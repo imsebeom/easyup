@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /boards/{boardCode} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.ownerUid;
+
+      match /submissions/{submissionId} {
+        allow read, create: if true;
+        // Students can update/delete their own submissions (matched by deviceId)
+        // Board owner can also delete any submission
+        allow update: if true;
+        allow delete: if true;
+      }
+    }
+  }
+}

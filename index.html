@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EasyUp - 과제 수합</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 교사: 로그인 -->
+    <div id="login-view" class="view active">
+      <div class="login-container">
+        <h1>📋 EasyUp</h1>
+        <p class="subtitle">간편한 과제 수합 도구</p>
+        <button class="btn btn-google" onclick="googleLogin()">
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+          Google로 로그인
+        </button>
+      </div>
+    </div>
+
+    <!-- 교사: 대시보드 -->
+    <div id="dashboard-view" class="view">
+      <header class="dashboard-header">
+        <div class="header-left"><h1>📋 EasyUp</h1></div>
+        <div class="header-right">
+          <span id="user-name" class="user-name"></span>
+          <button class="btn btn-small" onclick="googleLogout()">로그아웃</button>
+        </div>
+      </header>
+      <div class="dashboard-toolbar">
+        <button class="btn btn-primary" onclick="showView('create-view')">+ 새 과제 보드</button>
+        <div class="search-box">
+          <input type="text" id="search-boards" placeholder="보드 검색..." oninput="filterBoards()">
+        </div>
+      </div>
+      <div class="sort-bar">
+        <span class="sort-label">정렬:</span>
+        <button class="sort-btn active" data-sort="createdAt" onclick="sortBoards('createdAt')">최신순</button>
+        <button class="sort-btn" data-sort="title" onclick="sortBoards('title')">제목순</button>
+        <button class="sort-btn" data-sort="submissions" onclick="sortBoards('submissions')">제출수</button>
+      </div>
+      <div id="dashboard-boards" class="dashboard-boards">
+        <div class="empty-state">로딩 중...</div>
+      </div>
+    </div>
+
+    <!-- 교사: 보드 생성 -->
+    <div id="create-view" class="view">
+      <header class="sub-header">
+        <button class="btn-back" onclick="showView('dashboard-view')">← 돌아가기</button>
+        <h2>과제 보드 만들기</h2>
+      </header>
+      <div class="form-container">
+        <div class="form-group">
+          <label>과제 제목 <span class="required">*</span></label>
+          <input type="text" id="board-title" placeholder="예: 3월 독서감상문">
+        </div>
+        <div class="form-group">
+          <label>설명 (선택)</label>
+          <textarea id="board-desc" placeholder="과제에 대한 안내사항을 입력하세요" rows="3"></textarea>
+        </div>
+        <div class="form-group">
+          <label>마감일 (선택)</label>
+          <input type="datetime-local" id="board-deadline">
+        </div>
+        <div class="form-group">
+          <label>제출 방식 허용</label>
+          <div class="checkbox-group">
+            <label class="checkbox-label"><input type="checkbox" id="allow-url" checked> 🔗 URL</label>
+            <label class="checkbox-label"><input type="checkbox" id="allow-text" checked> 📝 텍스트</label>
+            <label class="checkbox-label"><input type="checkbox" id="allow-file" checked> 📎 파일 업로드</label>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="createBoard()">보드 생성</button>
+      </div>
+    </div>
+
+    <!-- 교사: 보드 생성 완료 -->
+    <div id="created-view" class="view">
+      <header class="sub-header">
+        <button class="btn-back" onclick="showView('dashboard-view')">← 대시보드</button>
+        <h2>보드가 생성되었습니다!</h2>
+      </header>
+      <div class="result-container">
+        <div class="code-display">
+          <p>참여 코드</p>
+          <div class="big-code" id="created-code"></div>
+          <button class="btn btn-secondary" onclick="copyCode()">📋 코드 복사</button>
+          <button class="btn btn-secondary" onclick="copyLink()">🔗 링크 복사</button>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="goToBoard()">제출물 확인하기 →</button>
+      </div>
+    </div>
+
+    <!-- 학생: 이름 입력 -->
+    <div id="name-view" class="view">
+      <div class="name-container">
+        <div class="name-board-info">
+          <h1 id="name-board-title"></h1>
+          <p id="name-board-desc" class="board-desc"></p>
+          <div id="name-deadline-notice" class="deadline-notice" style="display:none"></div>
+        </div>
+        <div class="name-form">
+          <label>이름을 입력하세요</label>
+          <input type="text" id="student-name-input" placeholder="홍길동" autofocus>
+          <button class="btn btn-primary btn-full" onclick="enterBoard()">입장하기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 학생: 갤러리 보드 -->
+    <div id="gallery-view" class="view">
+      <header class="gallery-header">
+        <div class="gallery-header-left">
+          <h1 id="gallery-title"></h1>
+          <p id="gallery-desc" class="gallery-desc"></p>
+        </div>
+        <div class="gallery-header-right">
+          <span id="gallery-student-name" class="student-badge"></span>
+          <button class="btn btn-small" onclick="changeStudentName()">이름 변경</button>
+        </div>
+      </header>
+      <div id="gallery-deadline" class="deadline-notice" style="display:none"></div>
+      <div class="gallery-toolbar">
+        <span id="gallery-count" class="count-badge"></span>
+      </div>
+      <div id="gallery-grid" class="gallery-grid">
+        <div class="empty-state">아직 제출물이 없습니다. 첫 번째로 제출해보세요!</div>
+      </div>
+      <!-- 플로팅 제출 버튼 -->
+      <button class="fab" onclick="openSubmitForm()">+ 제출하기</button>
+    </div>
+
+    <!-- 학생: 제출 모달 -->
+    <div id="submit-modal" class="modal" style="display:none">
+      <div class="modal-overlay" onclick="closeSubmitModal()"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 id="submit-modal-title">과제 제출</h2>
+          <button class="modal-close" onclick="closeSubmitModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>제목 <span class="required">*</span></label>
+            <input type="text" id="submit-title-input" placeholder="과제 제목을 입력하세요">
+          </div>
+          <div class="form-group">
+            <label>제출 유형</label>
+            <div class="tab-group" id="submit-tabs"></div>
+          </div>
+          <div id="submit-url-section" class="submit-section" style="display:none">
+            <div class="form-group">
+              <label>URL</label>
+              <input type="url" id="submit-url" placeholder="https://...">
+            </div>
+          </div>
+          <div id="submit-text-section" class="submit-section" style="display:none">
+            <div class="form-group">
+              <label>텍스트</label>
+              <textarea id="submit-text" placeholder="과제 내용을 입력하세요" rows="6"></textarea>
+            </div>
+          </div>
+          <div id="submit-file-section" class="submit-section" style="display:none">
+            <div class="form-group">
+              <label>파일 업로드 (최대 1GB)</label>
+              <div class="file-drop-zone" id="file-drop-zone">
+                <input type="file" id="submit-file" multiple>
+                <p>클릭하거나 파일을 드래그하세요</p>
+              </div>
+              <div id="file-list" class="file-list"></div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>메모 (선택)</label>
+            <input type="text" id="submit-memo" placeholder="추가 메모">
+          </div>
+          <button class="btn btn-primary btn-full" id="submit-btn" onclick="submitAssignment()">제출하기</button>
+          <div id="submit-progress" class="progress-bar" style="display:none">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 학생: 제출물 상세 모달 -->
+    <div id="detail-modal" class="modal" style="display:none">
+      <div class="modal-overlay" onclick="closeDetailModal()"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 id="detail-title"></h2>
+          <button class="modal-close" onclick="closeDetailModal()">✕</button>
+        </div>
+        <div class="modal-body" id="detail-body"></div>
+      </div>
+    </div>
+
+    <!-- 교사: 보드 보기 -->
+    <div id="board-view" class="view">
+      <header class="sub-header">
+        <button class="btn-back" onclick="backToDashboard()">← 대시보드</button>
+        <h2 id="board-title-display"></h2>
+        <div class="board-code-badge" id="board-code-badge"></div>
+      </header>
+      <div id="board-desc-display" class="board-desc"></div>
+      <div class="board-toolbar">
+        <span id="submission-count" class="count-badge"></span>
+        <div class="toolbar-actions">
+          <button class="btn btn-small" onclick="copyBoardLink()">🔗 링크 복사</button>
+          <button class="btn btn-small" onclick="downloadAll()">📥 전체 다운로드</button>
+          <button class="btn btn-small btn-danger" onclick="deleteBoard()">🗑 보드 삭제</button>
+        </div>
+      </div>
+      <div id="submissions-list" class="submissions-list">
+        <div class="empty-state">아직 제출물이 없습니다</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
