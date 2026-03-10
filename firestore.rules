@@ -1,6 +1,17 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    match /users/{userId} {
+      // Any authenticated user can read and create their own doc
+      allow read, create: if request.auth != null && request.auth.uid == userId;
+      // Admin can list all users and update any user
+      allow list: if request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow update: if request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
     match /boards/{boardCode} {
       allow read: if true;
       allow create: if request.auth != null;
@@ -8,8 +19,6 @@ service cloud.firestore {
 
       match /submissions/{submissionId} {
         allow read, create: if true;
-        // Students can update/delete their own submissions (matched by deviceId)
-        // Board owner can also delete any submission
         allow update: if true;
         allow delete: if true;
       }

@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, where, getCountFromServer } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, where, getCountFromServer } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-storage.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
 
@@ -106,6 +106,7 @@ function submissionsQuery(boardCode) {
 }
 
 // ── State ──
+let currentUserRole = null; // 'admin' | 'approved' | 'pending' | 'rejected'
 let currentUser = null;
 let currentBoard = null;
 let currentBoardCode = null;
@@ -118,6 +119,7 @@ let currentSortDir = 'desc';
 let editingSubmissionId = null;
 let existingFiles = null;
 let studentName = '';
+let teacherEditMode = false; // true when teacher edits from board-view
 
 // ── Device ID ──
 function getDeviceId() {
@@ -136,10 +138,11 @@ window.showView = function(viewId) {
   document.getElementById(viewId).classList.add('active');
   if (unsubscribe && viewId !== 'board-view') { unsubscribe(); unsubscribe = null; }
   if (unsubscribeGallery && viewId !== 'gallery-view') { unsubscribeGallery(); unsubscribeGallery = null; }
+  if (viewId === 'users-view') loadUsers();
 };
 
 // ══════════════════════════════════════
-//  AUTH
+//  AUTH & USER APPROVAL
 // ══════════════════════════════════════
 window.googleLogin = async function() {
   try { await signInWithPopup(auth, new GoogleAuthProvider()); }
@@ -148,25 +151,173 @@ window.googleLogin = async function() {
 
 window.googleLogout = async function() {
   await signOut(auth);
+  currentUserRole = null;
   showView('login-view');
 };
 
-onAuthStateChanged(auth, (user) => {
-  currentUser = user;
-  if (user) {
-    document.getElementById('user-name').textContent = user.displayName || user.email;
+const ADMIN_EMAIL = 'hccgahy1@gmail.com';
+
+/** Check/create user doc and return role */
+async function checkUserApproval(user) {
+  const userRef = doc(db, 'users', user.uid);
+  const userDoc = await getDoc(userRef);
+
+  if (userDoc.exists()) {
+    return userDoc.data().role;
   }
+
+  // New user: admin email gets admin role, others get pending
+  const role = user.email === ADMIN_EMAIL ? 'admin' : 'pending';
+
+  await setDoc(userRef, {
+    email: user.email,
+    displayName: user.displayName || '',
+    photoURL: user.photoURL || '',
+    role,
+    createdAt: serverTimestamp()
+  });
+
+  return role;
+}
+
+onAuthStateChanged(auth, async (user) => {
+  currentUser = user;
   const hash = location.hash.slice(1);
+
+  // Student route: no auth needed
   if (hash.startsWith('join/')) {
     handleStudentRoute(hash.split('/')[1].toUpperCase());
-  } else if (hash.startsWith('board/') && user) {
+    return;
+  }
+
+  if (!user) {
+    showView('login-view');
+    return;
+  }
+
+  // Check approval status
+  try {
+    currentUserRole = await checkUserApproval(user);
+  } catch (e) {
+    console.error(e);
+    toast('사용자 정보 확인 실패');
+    return;
+  }
+
+  document.getElementById('user-name').textContent = user.displayName || user.email;
+
+  if (currentUserRole === 'pending' || currentUserRole === 'rejected') {
+    const isRejected = currentUserRole === 'rejected';
+    document.getElementById('pending-email').textContent = user.email;
+    document.getElementById('pending-icon').textContent = isRejected ? '🚫' : '⏳';
+    document.getElementById('pending-heading').textContent = isRejected ? '승인 거부됨' : '승인 대기 중';
+    document.getElementById('pending-desc').textContent = isRejected
+      ? '관리자에 의해 접근이 거부되었습니다.'
+      : '관리자가 승인하면 사용할 수 있습니다.';
+    showView('pending-view');
+    return;
+  }
+
+  // admin or approved
+  if (currentUserRole === 'admin') {
+    document.getElementById('btn-manage-users').style.display = '';
+  }
+
+  if (hash.startsWith('board/')) {
     openBoard(hash.split('/')[1].toUpperCase());
-  } else if (user) {
+  } else {
     showView('dashboard-view');
     loadMyBoards();
-  } else if (!hash.startsWith('join/')) {
-    showView('login-view');
   }
+});
+
+// ══════════════════════════════════════
+//  ADMIN: USER MANAGEMENT
+// ══════════════════════════════════════
+const ROLE_LABEL = { admin: '관리자', approved: '승인됨', pending: '대기중', rejected: '거부됨' };
+const ROLE_CLS   = { admin: 'status-admin', approved: 'status-approved', pending: 'status-pending', rejected: 'status-rejected' };
+
+async function loadUsers() {
+  const container = document.getElementById('users-list');
+  container.innerHTML = '<div class="empty-state">로딩 중...</div>';
+  try {
+    const snapshot = await getDocs(collection(db, 'users'));
+    const users = snapshot.docs.map(d => ({ uid: d.id, ...d.data() }));
+
+    // Sort: pending first, then by date
+    users.sort((a, b) => {
+      const order = { pending: 0, approved: 1, admin: 2, rejected: 3 };
+      if (order[a.role] !== order[b.role]) return order[a.role] - order[b.role];
+      return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
+    });
+
+    if (!users.length) {
+      container.innerHTML = '<div class="empty-state">등록된 회원이 없습니다</div>';
+      return;
+    }
+
+    container.innerHTML = users.map(u => {
+      const date = u.createdAt ? new Date(u.createdAt.toMillis()).toLocaleDateString('ko-KR') : '';
+      const isSelf = u.uid === currentUser.uid;
+
+      let actions = '';
+      if (!isSelf) {
+        if (u.role === 'pending') {
+          actions = `<button class="btn-approve" data-uid="${escapeHtml(u.uid)}">승인</button>
+                     <button class="btn-reject" data-uid="${escapeHtml(u.uid)}">거부</button>`;
+        } else if (u.role === 'approved') {
+          actions = `<button class="btn-revoke" data-uid="${escapeHtml(u.uid)}">승인 취소</button>`;
+        } else if (u.role === 'rejected') {
+          actions = `<button class="btn-approve" data-uid="${escapeHtml(u.uid)}">승인</button>`;
+        }
+      }
+
+      return `<div class="user-card">
+        <div class="user-info">
+          <span class="user-info-name" data-uid="${escapeHtml(u.uid)}">${escapeHtml(u.displayName || '(이름 없음)')}</span>
+          <button class="btn-edit-name" data-uid="${escapeHtml(u.uid)}" data-name="${escapeHtml(u.displayName || '')}" title="이름 수정">✏️</button>
+          <span class="user-info-email">${escapeHtml(u.email)}</span>
+          <span class="user-info-date">${date}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="user-status ${ROLE_CLS[u.role] || ''}">${ROLE_LABEL[u.role] || u.role}</span>
+          <div class="user-actions">${actions}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    console.error(e);
+    container.innerHTML = '<div class="empty-state">불러오기 실패</div>';
+  }
+}
+
+/** Helper: update user field and reload list */
+async function updateUser(uid, data, msg) {
+  try {
+    await updateDoc(doc(db, 'users', uid), data);
+    toast(msg);
+    loadUsers();
+  } catch (e) { toast('처리 실패'); }
+}
+
+// Event delegation for user management
+document.getElementById('users-list').addEventListener('click', (e) => {
+  const editNameBtn = e.target.closest('.btn-edit-name');
+  if (editNameBtn) {
+    const newName = prompt('표시 이름 변경', editNameBtn.dataset.name);
+    if (newName !== null && newName.trim() !== editNameBtn.dataset.name) {
+      updateUser(editNameBtn.dataset.uid, { displayName: newName.trim() }, '이름 변경됨');
+    }
+    return;
+  }
+  const approveBtn = e.target.closest('.btn-approve');
+  if (approveBtn) { updateUser(approveBtn.dataset.uid, { role: 'approved' }, '승인 완료'); return; }
+
+  const rejectBtn = e.target.closest('.btn-reject');
+  if (rejectBtn) { updateUser(rejectBtn.dataset.uid, { role: 'rejected' }, '거부 완료'); return; }
+
+  const revokeBtn = e.target.closest('.btn-revoke');
+  if (revokeBtn) { updateUser(revokeBtn.dataset.uid, { role: 'rejected' }, '승인 취소됨'); return; }
 });
 
 // ══════════════════════════════════════
@@ -303,7 +454,7 @@ document.getElementById('gallery-grid').addEventListener('click', (e) => {
   if (editBtn) { e.stopPropagation(); editMySubmission(editBtn.dataset.id); return; }
 
   const delBtn = e.target.closest('.btn-del');
-  if (delBtn) { e.stopPropagation(); deleteMySubmission(delBtn.dataset.id); return; }
+  if (delBtn) { e.stopPropagation(); removeSubmission(delBtn.dataset.id, { checkOwnership: true }); return; }
 
   const card = e.target.closest('.gallery-card');
   if (card?.dataset.id) openDetail(card.dataset.id);
@@ -350,6 +501,7 @@ window.closeDetailModal = function() {
 function resetSubmitForm() {
   editingSubmissionId = null;
   existingFiles = null;
+  teacherEditMode = false;
   selectedFiles = [];
   document.getElementById('submit-title-input').value = '';
   document.getElementById('submit-url').value = '';
@@ -390,6 +542,7 @@ function setupTabs() {
 window.closeSubmitModal = function() {
   document.getElementById('submit-modal').style.display = 'none';
   existingFiles = null;
+  teacherEditMode = false;
 };
 
 function selectTab(type) {
@@ -488,21 +641,26 @@ window.submitAssignment = async function() {
       }
     }
 
-    const submissionData = {
-      name: studentName, title, type, content, files, memo,
-      deviceId, boardCode: currentBoardCode,
-      createdAt: serverTimestamp()
-    };
-
     if (editingSubmissionId) {
+      // Editing: preserve original name/deviceId, only update content fields
       if (type === 'file' && files.length === 0 && existingFiles?.length) files = existingFiles;
-      submissionData.files = files;
-      submissionData.updatedAt = serverTimestamp();
-      await setDoc(doc(db, 'boards', currentBoardCode, 'submissions', editingSubmissionId), submissionData);
+      const updateData = { title, type, content, files, memo, updatedAt: serverTimestamp() };
+      // Teacher edit: don't overwrite name/deviceId; Student edit: update name
+      if (!teacherEditMode) {
+        updateData.name = studentName;
+        updateData.deviceId = deviceId;
+      }
+      await updateDoc(doc(db, 'boards', currentBoardCode, 'submissions', editingSubmissionId), updateData);
       editingSubmissionId = null;
       existingFiles = null;
+      teacherEditMode = false;
       toast('수정 완료!');
     } else {
+      const submissionData = {
+        name: studentName, title, type, content, files, memo,
+        deviceId, boardCode: currentBoardCode,
+        createdAt: serverTimestamp()
+      };
       const submissionId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       await setDoc(doc(db, 'boards', currentBoardCode, 'submissions', submissionId), submissionData);
       toast('제출 완료!');
@@ -520,47 +678,52 @@ window.submitAssignment = async function() {
   }
 };
 
-// ── Edit / Delete (Student) ──
+// ── Edit / Delete ──
+/** Shared edit modal opener for both student and teacher */
+function openEditModal(submissionId, data, isTeacher) {
+  teacherEditMode = isTeacher;
+  resetSubmitForm();
+  editingSubmissionId = submissionId;
+  document.getElementById('submit-modal-title').textContent =
+    isTeacher ? `과제 수정 (${data.name})` : '과제 수정';
+  document.getElementById('submit-title-input').value = data.title || '';
+  document.getElementById('submit-memo').value = data.memo || '';
+  document.getElementById('submit-btn').textContent = '수정하기';
+
+  setupTabs();
+  selectTab(data.type);
+
+  if (data.type === 'url') document.getElementById('submit-url').value = data.content || '';
+  else if (data.type === 'text') document.getElementById('submit-text').value = data.content || '';
+  else if (data.type === 'file') {
+    document.getElementById('file-list').innerHTML =
+      '<div class="file-edit-notice">기존 파일이 유지됩니다. 새 파일을 선택하면 교체됩니다.</div>';
+    existingFiles = data.files || [];
+  }
+
+  document.getElementById('submit-modal').style.display = 'flex';
+}
+
 async function editMySubmission(submissionId) {
   try {
     const subDoc = await getDoc(doc(db, 'boards', currentBoardCode, 'submissions', submissionId));
     if (!subDoc.exists()) return;
     const data = subDoc.data();
     if (data.deviceId !== deviceId) { toast('수정 권한이 없습니다'); return; }
-
-    resetSubmitForm();
-    editingSubmissionId = submissionId;
-    document.getElementById('submit-modal-title').textContent = '과제 수정';
-    document.getElementById('submit-title-input').value = data.title || '';
-    document.getElementById('submit-memo').value = data.memo || '';
-    document.getElementById('submit-btn').textContent = '수정하기';
-
-    setupTabs();
-    selectTab(data.type);
-
-    if (data.type === 'url') document.getElementById('submit-url').value = data.content || '';
-    else if (data.type === 'text') document.getElementById('submit-text').value = data.content || '';
-    else if (data.type === 'file') {
-      document.getElementById('file-list').innerHTML =
-        '<div class="file-edit-notice">기존 파일이 유지됩니다. 새 파일을 선택하면 교체됩니다.</div>';
-      existingFiles = data.files || [];
-    }
-
-    document.getElementById('submit-modal').style.display = 'flex';
+    openEditModal(submissionId, data, false);
   } catch (e) { console.error(e); }
 }
 
-async function deleteMySubmission(submissionId) {
-  if (!confirm('이 제출물을 삭제하시겠습니까?')) return;
+async function removeSubmission(id, { checkOwnership = false } = {}) {
+  if (!confirm('삭제하시겠습니까?')) return;
   try {
-    const subDoc = await getDoc(doc(db, 'boards', currentBoardCode, 'submissions', submissionId));
-    if (subDoc.exists()) {
-      const data = subDoc.data();
-      if (data.deviceId !== deviceId) { toast('삭제 권한이 없습니다'); return; }
-      await deleteStorageFiles(data.files);
+    const sub = await getDoc(doc(db, 'boards', currentBoardCode, 'submissions', id));
+    if (sub.exists()) {
+      if (checkOwnership && sub.data().deviceId !== deviceId) { toast('삭제 권한이 없습니다'); return; }
+      await deleteStorageFiles(sub.data().files);
     }
-    await deleteDoc(doc(db, 'boards', currentBoardCode, 'submissions', submissionId));
-    toast('삭제되었습니다');
+    await deleteDoc(doc(db, 'boards', currentBoardCode, 'submissions', id));
+    toast('삭제됨');
   } catch (e) { toast('삭제 실패'); }
 }
 
@@ -654,15 +817,20 @@ function copyJoinLink(code) {
   toast('학생 참여 링크 복사됨');
 }
 
+/** Delete board and all its submissions + files */
+async function deleteBoardData(code) {
+  const subs = await getDocs(collection(db, 'boards', code, 'submissions'));
+  await Promise.all(subs.docs.map(async (s) => {
+    await deleteStorageFiles(s.data().files);
+    await deleteDoc(s.ref);
+  }));
+  await deleteDoc(doc(db, 'boards', code));
+}
+
 async function deleteBoardFromList(code, title) {
   if (!confirm(`"${title}" 보드를 삭제하시겠습니까?`)) return;
   try {
-    const subs = await getDocs(collection(db, 'boards', code, 'submissions'));
-    await Promise.all(subs.docs.map(async (s) => {
-      await deleteStorageFiles(s.data().files);
-      await deleteDoc(s.ref);
-    }));
-    await deleteDoc(doc(db, 'boards', code));
+    await deleteBoardData(code);
     allBoards = allBoards.filter(b => b.code !== code);
     renderDashboard();
     toast('삭제됨');
@@ -766,36 +934,35 @@ function renderSubmissions(docs) {
       ${contentHtml}
       ${renderFileLinksHtml(data.files)}
       ${data.memo ? `<div class="submission-memo">💬 ${escapeHtml(data.memo)}</div>` : ''}
-      <div class="submission-actions"><button class="btn-delete-submission btn-del-sub" data-id="${escapeHtml(d.id)}">삭제</button></div>
+      <div class="submission-actions">
+        <button class="btn-edit-submission btn-edit-sub" data-id="${escapeHtml(d.id)}">수정</button>
+        <button class="btn-delete-submission btn-del-sub" data-id="${escapeHtml(d.id)}">삭제</button>
+      </div>
     </div>`;
   }).join('');
 }
 
 // Event delegation for teacher submissions
 document.getElementById('submissions-list').addEventListener('click', (e) => {
+  const editBtn = e.target.closest('.btn-edit-sub');
+  if (editBtn) { teacherEditSubmission(editBtn.dataset.id); return; }
+
   const btn = e.target.closest('.btn-del-sub');
-  if (btn) deleteSubmission(btn.dataset.id);
+  if (btn) removeSubmission(btn.dataset.id);
 });
 
-async function deleteSubmission(id) {
-  if (!confirm('삭제하시겠습니까?')) return;
+async function teacherEditSubmission(submissionId) {
   try {
-    const sub = await getDoc(doc(db, 'boards', currentBoardCode, 'submissions', id));
-    if (sub.exists()) await deleteStorageFiles(sub.data().files);
-    await deleteDoc(doc(db, 'boards', currentBoardCode, 'submissions', id));
-    toast('삭제됨');
-  } catch (e) { toast('삭제 실패'); }
+    const subDoc = await getDoc(doc(db, 'boards', currentBoardCode, 'submissions', submissionId));
+    if (!subDoc.exists()) return;
+    openEditModal(submissionId, subDoc.data(), true);
+  } catch (e) { console.error(e); toast('수정 오류'); }
 }
 
 window.deleteBoard = async function() {
   if (!confirm(`"${currentBoard.title}" 보드를 삭제하시겠습니까?`)) return;
   try {
-    const subs = await getDocs(collection(db, 'boards', currentBoardCode, 'submissions'));
-    await Promise.all(subs.docs.map(async (s) => {
-      await deleteStorageFiles(s.data().files);
-      await deleteDoc(s.ref);
-    }));
-    await deleteDoc(doc(db, 'boards', currentBoardCode));
+    await deleteBoardData(currentBoardCode);
     toast('삭제됨');
     backToDashboard();
   } catch (e) { toast('삭제 실패'); }

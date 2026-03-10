@@ -20,12 +20,27 @@
       </div>
     </div>
 
+    <!-- 승인 대기 -->
+    <div id="pending-view" class="view">
+      <div class="login-container">
+        <h1>📋 EasyUp</h1>
+        <div class="pending-card">
+          <div class="pending-icon" id="pending-icon">⏳</div>
+          <h2 id="pending-heading">승인 대기 중</h2>
+          <p id="pending-email" class="pending-email"></p>
+          <p class="pending-desc" id="pending-desc">관리자가 승인하면 사용할 수 있습니다.</p>
+          <button class="btn btn-small" onclick="googleLogout()">로그아웃</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 교사: 대시보드 -->
     <div id="dashboard-view" class="view">
       <header class="dashboard-header">
         <div class="header-left"><h1>📋 EasyUp</h1></div>
         <div class="header-right">
           <span id="user-name" class="user-name"></span>
+          <button class="btn btn-small" id="btn-manage-users" onclick="showView('users-view')" style="display:none">👥 회원관리</button>
           <button class="btn btn-small" onclick="googleLogout()">로그아웃</button>
         </div>
       </header>
@@ -193,6 +208,17 @@
           <button class="modal-close" onclick="closeDetailModal()">✕</button>
         </div>
         <div class="modal-body" id="detail-body"></div>
+      </div>
+    </div>
+
+    <!-- 관리자: 회원 관리 -->
+    <div id="users-view" class="view">
+      <header class="sub-header">
+        <button class="btn-back" onclick="showView('dashboard-view')">← 대시보드</button>
+        <h2>회원 관리</h2>
+      </header>
+      <div id="users-list" class="users-list">
+        <div class="empty-state">로딩 중...</div>
       </div>
     </div>
 

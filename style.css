@@ -21,6 +21,36 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .btn-google { display:inline-flex; align-items:center; gap:10px; padding:12px 28px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:1rem; font-weight:600; cursor:pointer; box-shadow:var(--shadow); transition:all .15s; }
 .btn-google:hover { box-shadow:var(--shadow-lg); transform:translateY(-1px); }
 
+/* ── Pending Approval ── */
+.pending-card { background:var(--card-bg); border:1px solid var(--border); border-radius:var(--radius); padding:40px 32px; box-shadow:var(--shadow); display:inline-block; margin-top:20px; }
+.pending-icon { font-size:3rem; margin-bottom:12px; }
+.pending-card h2 { font-size:1.3rem; margin-bottom:8px; }
+.pending-email { color:var(--primary); font-weight:600; font-size:.95rem; margin-bottom:8px; }
+.pending-desc { color:var(--text-light); font-size:.9rem; margin-bottom:20px; }
+
+/* ── Users Management ── */
+.users-list { display:flex; flex-direction:column; gap:8px; }
+.user-card { display:flex; align-items:center; justify-content:space-between; background:var(--card-bg); border:1px solid var(--border); border-radius:var(--radius); padding:14px 20px; box-shadow:var(--shadow); gap:12px; flex-wrap:wrap; }
+.user-info { display:flex; flex-direction:column; gap:2px; position:relative; }
+.btn-edit-name { background:none; border:none; cursor:pointer; font-size:.8rem; padding:2px 4px; position:absolute; right:-28px; top:0; opacity:.4; transition:opacity .15s; }
+.btn-edit-name:hover { opacity:1; }
+.user-card:hover .btn-edit-name { opacity:.7; }
+.user-info-name { font-weight:700; font-size:.95rem; }
+.user-info-email { font-size:.85rem; color:var(--text-light); }
+.user-info-date { font-size:.75rem; color:var(--text-light); }
+.user-status { display:inline-block; padding:2px 10px; border-radius:12px; font-size:.75rem; font-weight:700; }
+.status-approved { background:#dcfce7; color:#166534; }
+.status-pending { background:#fef3c7; color:#92400e; }
+.status-rejected { background:#fee2e2; color:#991b1b; }
+.status-admin { background:var(--primary-light); color:var(--primary); }
+.user-actions { display:flex; gap:6px; }
+.btn-approve { padding:6px 14px; border:none; border-radius:6px; background:#16a34a; color:#fff; font-size:.8rem; font-weight:600; cursor:pointer; }
+.btn-approve:hover { background:#15803d; }
+.btn-reject { padding:6px 14px; border:none; border-radius:6px; background:var(--danger); color:#fff; font-size:.8rem; font-weight:600; cursor:pointer; }
+.btn-reject:hover { background:#dc2626; }
+.btn-revoke { padding:6px 14px; border:none; border-radius:6px; background:var(--card-bg); border:1px solid var(--border); color:var(--text-light); font-size:.8rem; font-weight:600; cursor:pointer; }
+.btn-revoke:hover { background:var(--bg); color:var(--danger); border-color:var(--danger); }
+
 /* ── Student: Name Entry ── */
 .name-container { max-width:480px; margin:60px auto; text-align:center; }
 .name-board-info { margin-bottom:32px; }
@@ -228,6 +258,8 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); box-sha
 .file-link { display:inline-flex; align-items:center; gap:4px; color:var(--primary); text-decoration:none; font-size:.9rem; }
 .file-link:hover { text-decoration:underline; }
 .submission-actions { margin-top:10px; display:flex; justify-content:flex-end; }
+.btn-edit-submission { background:none; border:none; color:var(--text-light); cursor:pointer; font-size:.8rem; padding:4px 8px; border-radius:4px; margin-right:4px; }
+.btn-edit-submission:hover { color:var(--primary); background:var(--primary-light); }
 .btn-delete-submission { background:none; border:none; color:var(--text-light); cursor:pointer; font-size:.8rem; padding:4px 8px; border-radius:4px; }
 .btn-delete-submission:hover { color:var(--danger); background:#fee2e2; }
 
