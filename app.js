@@ -100,6 +100,11 @@ function sanitizeUrl(url) {
   return trimmed;
 }
 
+/** Build student join link for a board code */
+function getJoinLink(code) {
+  return `${location.origin}${location.pathname}#join/${code}`;
+}
+
 /** Build submissions query for a board */
 function submissionsQuery(boardCode) {
   return query(collection(db, 'boards', boardCode, 'submissions'), orderBy('createdAt', 'desc'));
@@ -340,7 +345,7 @@ async function handleStudentRoute(code) {
     currentBoard.code = code;
     currentBoardCode = code;
 
-    const savedName = localStorage.getItem('easyup_name');
+    const savedName = localStorage.getItem(`easyup_name_${code}`);
     if (savedName) {
       studentName = savedName;
       showGallery();
@@ -369,7 +374,7 @@ window.enterBoard = function() {
   const name = document.getElementById('student-name-input').value.trim();
   if (!name) { toast('이름을 입력하세요'); return; }
   studentName = name;
-  localStorage.setItem('easyup_name', name);
+  localStorage.setItem(`easyup_name_${currentBoardCode}`, name);
   showGallery();
 };
 
@@ -785,6 +790,7 @@ function renderDashboard() {
       <td class="col-deadline ${dlClass}">${dlText}</td>
       <td class="col-date">${created}</td>
       <td class="col-actions">
+        <button class="btn-icon btn-qr" data-code="${escapeHtml(b.code)}" data-title="${escapeHtml(b.title)}" title="QR 코드">📱</button>
         <button class="btn-icon btn-copy-link" data-code="${escapeHtml(b.code)}" title="링크 복사">🔗</button>
         <button class="btn-icon btn-icon-danger btn-del-board" data-code="${escapeHtml(b.code)}" data-title="${escapeHtml(b.title)}" title="삭제">🗑</button>
       </td></tr>`;
@@ -793,6 +799,9 @@ function renderDashboard() {
 
 // Event delegation for dashboard table (XSS-safe)
 document.getElementById('dashboard-boards').addEventListener('click', (e) => {
+  const qrBtn = e.target.closest('.btn-qr');
+  if (qrBtn) { e.stopPropagation(); showQrModal(qrBtn.dataset.code, qrBtn.dataset.title); return; }
+
   const copyBtn = e.target.closest('.btn-copy-link');
   if (copyBtn) { e.stopPropagation(); copyJoinLink(copyBtn.dataset.code); return; }
 
@@ -813,7 +822,7 @@ window.sortBoards = function(field) {
 };
 
 function copyJoinLink(code) {
-  navigator.clipboard.writeText(`${location.origin}${location.pathname}#join/${code}`);
+  navigator.clipboard.writeText(getJoinLink(code));
   toast('학생 참여 링크 복사됨');
 }
 
@@ -874,12 +883,12 @@ window.createBoard = async function() {
 };
 
 window.copyCode = () => { navigator.clipboard.writeText(currentBoardCode); toast('코드 복사됨'); };
-window.copyLink = () => { navigator.clipboard.writeText(`${location.origin}${location.pathname}#join/${currentBoardCode}`); toast('링크 복사됨'); };
+window.copyLink = () => { navigator.clipboard.writeText(getJoinLink(currentBoardCode)); toast('링크 복사됨'); };
 window.goToBoard = () => openBoard(currentBoardCode);
 window.backToDashboard = () => { showView('dashboard-view'); location.hash = ''; loadMyBoards(); };
 
 window.copyBoardLink = () => {
-  navigator.clipboard.writeText(`${location.origin}${location.pathname}#join/${currentBoard.code}`);
+  navigator.clipboard.writeText(getJoinLink(currentBoard.code));
   toast('링크 복사됨');
 };
 
@@ -992,6 +1001,49 @@ window.downloadAll = function() {
   link.download = `${currentBoard.title}_제출물.txt`;
   link.click();
   URL.revokeObjectURL(link.href);
+};
+
+// ══════════════════════════════════════
+//  QR CODE POPUP WINDOW
+// ══════════════════════════════════════
+let qrPopup = null;
+
+function openQrPopup(code, title) {
+  const link = getJoinLink(code);
+  if (qrPopup && !qrPopup.closed) qrPopup.close();
+  qrPopup = window.open('', '_blank', 'width=400,height=520,menubar=no,toolbar=no,location=no,status=no');
+  if (!qrPopup) { toast('팝업이 차단되었습니다. 팝업을 허용해주세요.'); return; }
+
+  qrPopup.document.write(`<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8">
+<title>QR - ${escapeHtml(title)}</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"><\/script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#f8fafc; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:24px; }
+  .title { font-size:1.2rem; font-weight:700; color:#1e293b; margin-bottom:16px; text-align:center; }
+  #qr { margin-bottom:16px; }
+  #qr canvas { border-radius:8px; }
+  .link { font-size:.8rem; color:#64748b; word-break:break-all; text-align:center; margin-bottom:20px; max-width:320px; }
+  .actions { display:flex; gap:10px; }
+  .btn { padding:8px 18px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; font-size:.85rem; font-weight:600; cursor:pointer; transition:all .15s; }
+  .btn:hover { background:#eef2ff; border-color:#4f46e5; color:#4f46e5; }
+</style></head><body>
+<div class="title">${escapeHtml(title)}</div>
+<div id="qr"></div>
+<div class="link">${escapeHtml(link)}</div>
+<div class="actions">
+  <button class="btn" onclick="navigator.clipboard.writeText('${link}');this.textContent='복사됨!';setTimeout(()=>this.textContent='🔗 링크 복사',1500)">🔗 링크 복사</button>
+  <button class="btn" onclick="var c=document.querySelector('#qr canvas');if(c){var a=document.createElement('a');a.href=c.toDataURL('image/png');a.download='QR_${escapeHtml(code)}.png';a.click()}">📥 QR 저장</button>
+</div>
+<script>new QRCode(document.getElementById('qr'),{text:'${link}',width:256,height:256,colorDark:'#1e293b',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});<\/script>
+</body></html>`);
+  qrPopup.document.close();
+}
+
+window.showQrModal = openQrPopup;
+window.showBoardQr = function() {
+  if (currentBoard) openQrPopup(currentBoard.code, currentBoard.title);
 };
 
 // ── Init ──
