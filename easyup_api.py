@@ -27,9 +27,9 @@ API_KEY = "REDACTED_API_KEY"
 BASE_URL = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
 HOSTING_URL = "https://easyup-1604e.web.app"
 
-# Owner UID for API-created boards (admin account)
-OWNER_UID = "api"
-OWNER_NAME = "EasyUp API"
+# Owner UID for API-created boards (임세범 선생님 계정)
+OWNER_UID = "bCE3XELLx0W85uUEz4TUz7Iqb2k2"
+OWNER_NAME = "임세범"
 
 CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 

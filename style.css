@@ -294,7 +294,8 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); box-sha
 
 /* ── Shelf Layout (Inquiry) ── */
 /* When inquiry views are active, expand #app to full width */
-#app:has(#inquiry-gallery-view.active), #app:has(#inquiry-board-view.active) { max-width:none; }
+#app:has(#inquiry-gallery-view.active), #app:has(#inquiry-board-view.active),
+#app:has(#gallery-view.active), #app:has(#board-view.active) { max-width:none; }
 .shelf-container { display:flex; gap:10px; padding-bottom:16px; min-height:300px; }
 .shelf-column { flex:1; min-width:0; display:flex; flex-direction:column; }
 .shelf-header { padding:10px 14px; border-radius:8px 8px 0 0; font-weight:700; font-size:.9rem; display:flex; justify-content:space-between; align-items:center; }
@@ -318,11 +319,12 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); box-sha
 .like-count { font-weight:600; }
 
 /* ── Drag & Drop (Teacher) ── */
-.inquiry-card[draggable="true"] { cursor:grab; }
-.inquiry-card[draggable="true"]:active { cursor:grabbing; }
-.inquiry-card.dragging { opacity:.3; }
+[draggable="true"] { cursor:grab; -webkit-user-select:none; user-select:none; }
+[draggable="true"]:active { cursor:grabbing; }
+.inquiry-card.dragging, .gallery-card.dragging { opacity:.3; }
 .shelf-column.shelf-drop-target .shelf-cards { background:var(--primary-light); border-color:var(--primary); }
-.inquiry-card.drag-above { border-top:3px solid var(--primary); margin-top:-1px; }
+.inquiry-card.drag-above, .gallery-card.drag-above { border-top:3px solid var(--primary); margin-top:-1px; }
+.drag-ghost { transition:none !important; border-radius:var(--radius); }
 
 /* ── Inquiry Category Select (Student Modal) ── */
 .category-select { display:flex; flex-wrap:wrap; gap:6px; }

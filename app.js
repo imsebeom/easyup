@@ -38,6 +38,117 @@ const INQUIRY_CATEGORIES = {
 // Student-selectable categories (excluding teacher-only ones)
 const STUDENT_CATEGORIES = ['factual', 'conceptual', 'debatable'];
 
+// ── Touch Drag Utility ──
+// Unified touch drag system for both inquiry shelf and assignment list
+function setupTouchDrag(container, {
+  cardSelector,
+  canDrag,           // optional: (card) => boolean
+  getDropTarget,     // (touchX, touchY, ghost) => { category?, afterEl?, cardsContainer? }
+  onDrop,            // (cardId, dropInfo) => Promise
+  highlightDrop,     // (dropInfo) => void
+  clearHighlight,    // () => void
+}) {
+  let touchDragId = null;
+  let touchDragEl = null;
+  let ghost = null;
+  let touchStartY = 0;
+  let touchStartX = 0;
+  let longPressTimer = null;
+  let isDragging = false;
+
+  container.addEventListener('touchstart', (e) => {
+    const card = e.target.closest(cardSelector);
+    if (!card || !card.getAttribute('draggable')) return;
+    if (canDrag && !canDrag(card)) return;
+    // Don't start drag from buttons
+    if (e.target.closest('button')) return;
+
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    touchDragId = card.dataset.id;
+    touchDragEl = card;
+
+    longPressTimer = setTimeout(() => {
+      isDragging = true;
+      card.classList.add('dragging');
+      // Create ghost
+      ghost = card.cloneNode(true);
+      ghost.classList.add('drag-ghost');
+      ghost.style.position = 'fixed';
+      ghost.style.width = card.offsetWidth + 'px';
+      ghost.style.zIndex = '9999';
+      ghost.style.pointerEvents = 'none';
+      ghost.style.opacity = '0.85';
+      ghost.style.transform = 'rotate(2deg) scale(1.03)';
+      ghost.style.boxShadow = '0 8px 25px rgba(0,0,0,0.2)';
+      ghost.style.left = (touchStartX - card.offsetWidth / 2) + 'px';
+      ghost.style.top = (touchStartY - 20) + 'px';
+      document.body.appendChild(ghost);
+      // Haptic feedback if available
+      if (navigator.vibrate) navigator.vibrate(30);
+    }, 300);
+  }, { passive: true });
+
+  container.addEventListener('touchmove', (e) => {
+    if (!isDragging || !ghost) {
+      // Cancel long press if moved too much before activation
+      const dx = e.touches[0].clientX - touchStartX;
+      const dy = e.touches[0].clientY - touchStartY;
+      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+        clearTimeout(longPressTimer);
+      }
+      return;
+    }
+    e.preventDefault();
+    const tx = e.touches[0].clientX;
+    const ty = e.touches[0].clientY;
+    ghost.style.left = (tx - ghost.offsetWidth / 2) + 'px';
+    ghost.style.top = (ty - 20) + 'px';
+
+    const dropInfo = getDropTarget(tx, ty, ghost);
+    clearHighlight();
+    if (dropInfo) highlightDrop(dropInfo);
+  }, { passive: false });
+
+  container.addEventListener('touchend', async (e) => {
+    clearTimeout(longPressTimer);
+    if (!isDragging || !touchDragId) {
+      isDragging = false;
+      touchDragId = null;
+      touchDragEl = null;
+      return;
+    }
+    // Get last touch position
+    const tx = e.changedTouches[0].clientX;
+    const ty = e.changedTouches[0].clientY;
+
+    if (touchDragEl) touchDragEl.classList.remove('dragging');
+    if (ghost) { ghost.remove(); ghost = null; }
+    clearHighlight();
+
+    const dropInfo = getDropTarget(tx, ty, null);
+    if (dropInfo) {
+      await onDrop(touchDragId, dropInfo, ty);
+    }
+    isDragging = false;
+    touchDragId = null;
+    touchDragEl = null;
+  });
+
+  container.addEventListener('touchcancel', () => {
+    clearTimeout(longPressTimer);
+    if (touchDragEl) touchDragEl.classList.remove('dragging');
+    if (ghost) { ghost.remove(); ghost = null; }
+    clearHighlight();
+    isDragging = false;
+    touchDragId = null;
+    touchDragEl = null;
+  });
+}
+
+// Track sort orders for assignment board
+let assignmentSortOrders = {};
+
 // Cached DateTimeFormat instances
 const dtfFull  = new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const dtfShort = new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric' });
@@ -269,10 +380,11 @@ onAuthStateChanged(auth, async (user) => {
     document.getElementById('btn-manage-users').style.display = '';
   }
 
-  if (hash.startsWith('board/')) {
-    openBoard(hash.split('/')[1].toUpperCase());
-  } else {
+  // Delegate to shared router
+  const routed = handleRoute();
+  if (!routed) {
     showView('dashboard-view');
+    location.hash = 'dashboard';
     loadMyBoards();
   }
 });
@@ -369,13 +481,26 @@ document.getElementById('users-list').addEventListener('click', (e) => {
 // ══════════════════════════════════════
 //  ROUTING
 // ══════════════════════════════════════
+/** Parse hash and navigate. Returns true if a route matched. */
 function handleRoute() {
   const hash = location.hash.slice(1);
-  if (hash.startsWith('join/')) {
+  // Student routes (no auth needed)
+  if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/')) {
     handleStudentRoute(hash.split('/')[1].toUpperCase());
-  } else if (hash.startsWith('board/') && currentUser) {
-    openBoard(hash.split('/')[1].toUpperCase());
+    return true;
   }
+  // Teacher routes (auth required)
+  if (!currentUser) return false;
+  if (hash.startsWith('board/')) { openBoard(hash.split('/')[1].toUpperCase()); return true; }
+  if (hash.startsWith('created/')) {
+    currentBoardCode = hash.split('/')[1].toUpperCase();
+    document.getElementById('created-code').textContent = currentBoardCode;
+    showView('created-view');
+    return true;
+  }
+  if (hash === 'dashboard') { showView('dashboard-view'); loadMyBoards(); return true; }
+  if (hash === 'users' && currentUserRole === 'admin') { showView('users-view'); return true; }
+  return false;
 }
 
 async function handleStudentRoute(code) {
@@ -408,6 +533,7 @@ function showNameView() {
   renderDeadline('name-deadline-notice', currentBoard.deadline);
   document.getElementById('student-name-input').value = '';
   showView('name-view');
+  location.hash = `join/${currentBoardCode}`;
   setTimeout(() => document.getElementById('student-name-input').focus(), 100);
 }
 
@@ -441,6 +567,7 @@ function showGallery() {
   renderDeadline('gallery-deadline', currentBoard.deadline);
 
   showView('gallery-view');
+  location.hash = `gallery/${currentBoardCode}`;
 
   if (unsubscribeGallery) unsubscribeGallery();
   unsubscribeGallery = onSnapshot(submissionsQuery(currentBoardCode), (snapshot) => {
@@ -538,14 +665,13 @@ async function openDetail(submissionId) {
 
     document.getElementById('detail-body').innerHTML = html;
     document.getElementById('detail-modal').style.display = 'flex';
+    openModalHistory();
   } catch (e) {
     console.error(e);
   }
 }
 
-window.closeDetailModal = function() {
-  document.getElementById('detail-modal').style.display = 'none';
-};
+window.closeDetailModal = function() { closeModal('detail-modal'); };
 
 // ══════════════════════════════════════
 //  STUDENT: SUBMIT MODAL
@@ -569,6 +695,7 @@ window.openSubmitForm = function() {
   document.getElementById('submit-modal-title').textContent = '과제 제출';
   setupTabs();
   document.getElementById('submit-modal').style.display = 'flex';
+  openModalHistory();
   setTimeout(() => document.getElementById('submit-title-input').focus(), 100);
 };
 
@@ -591,11 +718,7 @@ function setupTabs() {
   if (types.length > 0) selectTab(types[0]);
 }
 
-window.closeSubmitModal = function() {
-  document.getElementById('submit-modal').style.display = 'none';
-  existingFiles = null;
-  teacherEditMode = false;
-};
+window.closeSubmitModal = function() { closeModal('submit-modal'); };
 
 function selectTab(type) {
   document.querySelectorAll('.tab-btn').forEach(b => {
@@ -754,6 +877,7 @@ function openEditModal(submissionId, data, isTeacher) {
   }
 
   document.getElementById('submit-modal').style.display = 'flex';
+  openModalHistory();
 }
 
 async function editMySubmission(submissionId) {
@@ -947,6 +1071,7 @@ window.createBoard = async function() {
     currentBoardCode = code;
     document.getElementById('created-code').textContent = code;
     showView('created-view');
+    location.hash = `created/${code}`;
     toast('보드 생성 완료!');
   } catch (e) { toast('오류: ' + e.message); }
 };
@@ -954,7 +1079,7 @@ window.createBoard = async function() {
 window.copyCode = () => { navigator.clipboard.writeText(currentBoardCode); toast('코드 복사됨'); };
 window.copyLink = () => { navigator.clipboard.writeText(getJoinLink(currentBoardCode)); toast('링크 복사됨'); };
 window.goToBoard = () => openBoard(currentBoardCode);
-window.backToDashboard = () => { showView('dashboard-view'); location.hash = ''; loadMyBoards(); };
+window.backToDashboard = () => { showView('dashboard-view'); location.hash = 'dashboard'; loadMyBoards(); };
 
 window.copyBoardLink = () => {
   navigator.clipboard.writeText(getJoinLink(currentBoard.code));
@@ -995,44 +1120,160 @@ function renderSubmissions(docs) {
   document.getElementById('submission-count').textContent = `총 ${docs.length}건`;
   if (!docs.length) { list.innerHTML = '<div class="empty-state">아직 제출물이 없습니다</div>'; return; }
 
-  list.innerHTML = docs.map(d => {
-    const data = d.data();
-    const time = data.createdAt ? formatDate(data.createdAt.toDate()) : '';
-    const cfg = TYPE_CONFIG[data.type] || {};
-    const updated = data.updatedAt ? ' (수정됨)' : '';
+  // Sort by sortOrder (desc) then createdAt (desc)
+  const sorted = docs.map(d => ({ doc: d, data: d.data() }));
+  sorted.sort((a, b) => {
+    const oa = a.data.sortOrder || 0, ob = b.data.sortOrder || 0;
+    if (ob !== oa) return ob - oa;
+    const ta = a.data.createdAt?.toMillis?.() || 0, tb = b.data.createdAt?.toMillis?.() || 0;
+    return tb - ta;
+  });
 
-    let contentHtml = '';
+  // Track sort orders for drag-drop
+  assignmentSortOrders = {};
+  sorted.forEach(({ doc: d, data }) => { assignmentSortOrders[d.id] = data.sortOrder || 0; });
+
+  list.innerHTML = sorted.map(({ doc: d, data }) => {
+    const time = data.createdAt ? formatDateShort(data.createdAt.toDate()) : '';
+    const cfg = TYPE_CONFIG[data.type] || {};
+    const updated = data.updatedAt ? ' · 수정됨' : '';
+
+    let preview = '';
     if (data.type === 'url') {
-      const safeUrl = escapeHtml(sanitizeUrl(data.content));
-      contentHtml = `<div class="submission-content"><a href="${safeUrl}" target="_blank" rel="noopener">${safeUrl}</a></div>`;
+      try { preview = `<div class="card-url">${new URL(data.content).hostname}</div>`; }
+      catch { preview = `<div class="card-url">${escapeHtml(data.content)}</div>`; }
     } else if (data.type === 'text') {
-      contentHtml = `<div class="submission-content">${escapeHtml(data.content)}</div>`;
+      preview = `<div class="card-text">${escapeHtml(truncate(data.content, 120))}</div>`;
+    } else if (data.files?.length) {
+      preview = '<div class="card-files">' +
+        data.files.slice(0, 3).map(f => `<span class="card-file-chip">📄 ${escapeHtml(truncate(f.name, 20))}</span>`).join('') +
+        (data.files.length > 3 ? `<span class="card-file-more">+${data.files.length - 3}개</span>` : '') +
+        '</div>';
     }
 
-    return `<div class="submission-card" data-id="${escapeHtml(d.id)}">
-      <div class="submission-header">
-        <div><span class="submission-name">${escapeHtml(data.name)}</span><span class="submission-type ${cfg.cls || ''}">${cfg.label || ''}</span></div>
-        <span class="submission-time">${time}${updated}</span>
-      </div>
-      ${data.title ? `<div class="submission-title-text">${escapeHtml(data.title)}</div>` : ''}
-      ${contentHtml}
-      ${renderFileLinksHtml(data.files)}
-      ${data.memo ? `<div class="submission-memo">💬 ${escapeHtml(data.memo)}</div>` : ''}
-      <div class="submission-actions">
-        <button class="btn-edit-submission btn-edit-sub" data-id="${escapeHtml(d.id)}">수정</button>
-        <button class="btn-delete-submission btn-del-sub" data-id="${escapeHtml(d.id)}">삭제</button>
-      </div>
-    </div>`;
+    return `
+      <div class="gallery-card" data-id="${escapeHtml(d.id)}" draggable="true">
+        <div class="card-type-icon">${cfg.icon || ''}</div>
+        <h3 class="card-title">${escapeHtml(data.title || '(제목 없음)')}</h3>
+        ${preview}
+        ${data.memo ? `<div class="card-memo">💬 ${escapeHtml(data.memo)}</div>` : ''}
+        <div class="card-footer">
+          <span class="card-author">${escapeHtml(data.name)}</span>
+          <span class="card-time">${time}${updated}</span>
+        </div>
+        <div class="card-actions">
+          <button class="btn-icon btn-edit-sub" data-id="${escapeHtml(d.id)}" title="수정">✏️</button>
+          <button class="btn-icon btn-icon-danger btn-del-sub" data-id="${escapeHtml(d.id)}" title="삭제">🗑</button>
+        </div>
+      </div>`;
   }).join('');
 }
 
 // Event delegation for teacher submissions
-document.getElementById('submissions-list').addEventListener('click', (e) => {
+const submissionsList = document.getElementById('submissions-list');
+submissionsList.addEventListener('click', (e) => {
   const editBtn = e.target.closest('.btn-edit-sub');
-  if (editBtn) { teacherEditSubmission(editBtn.dataset.id); return; }
+  if (editBtn) { e.stopPropagation(); teacherEditSubmission(editBtn.dataset.id); return; }
 
   const btn = e.target.closest('.btn-del-sub');
-  if (btn) removeSubmission(btn.dataset.id);
+  if (btn) { e.stopPropagation(); removeSubmission(btn.dataset.id); return; }
+
+  const card = e.target.closest('.gallery-card');
+  if (card?.dataset.id) openDetail(card.dataset.id);
+});
+
+// ── Assignment Drag & Drop (Teacher) ──
+let assignDragId = null;
+let assignDragEl = null;
+
+/** Find the card element closest below y (for drag insertion point).
+ *  Works for both inquiry cards and submission cards via cardSelector. */
+function getDragAfterElement(container, y, cardSelector = '.inquiry-card') {
+  const cards = [...container.querySelectorAll(`${cardSelector}:not(.dragging)`)];
+  let closest = null;
+  let closestOffset = Number.NEGATIVE_INFINITY;
+  cards.forEach(card => {
+    const box = card.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > closestOffset) {
+      closestOffset = offset;
+      closest = card;
+    }
+  });
+  return closest;
+}
+
+/** Calculate sortOrder for insertion at afterEl position */
+function calcDropSortOrder(container, afterEl, sortOrdersMap, cardSelector) {
+  const cardEls = [...container.querySelectorAll(`${cardSelector}:not(.dragging)`)];
+  if (cardEls.length === 0) return Date.now();
+  if (!afterEl) {
+    return (sortOrdersMap[cardEls.at(-1).dataset.id] || 0) - 1;
+  }
+  const idx = cardEls.indexOf(afterEl);
+  const afterOrder = sortOrdersMap[afterEl.dataset.id] || 0;
+  if (idx === 0) return afterOrder + 1;
+  return ((sortOrdersMap[cardEls[idx - 1].dataset.id] || 0) + afterOrder) / 2;
+}
+
+async function assignDropCard(cardId, afterEl) {
+  const sortOrder = calcDropSortOrder(submissionsList, afterEl, assignmentSortOrders, '.gallery-card');
+  try {
+    await updateDoc(doc(db, 'boards', currentBoardCode, 'submissions', cardId), { sortOrder });
+  } catch (err) { console.error(err); toast('이동 실패'); }
+}
+
+submissionsList.addEventListener('dragstart', (e) => {
+  const card = e.target.closest('.gallery-card');
+  if (!card) return;
+  assignDragId = card.dataset.id;
+  assignDragEl = card;
+  card.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+});
+
+submissionsList.addEventListener('dragend', () => {
+  if (assignDragEl) assignDragEl.classList.remove('dragging');
+  if (prevAssignHighlight) { prevAssignHighlight.classList.remove('drag-above'); prevAssignHighlight = null; }
+  assignDragId = null;
+  assignDragEl = null;
+});
+
+let prevAssignHighlight = null;
+submissionsList.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const afterEl = getDragAfterElement(submissionsList, e.clientY, '.gallery-card');
+  if (afterEl !== prevAssignHighlight) {
+    if (prevAssignHighlight) prevAssignHighlight.classList.remove('drag-above');
+    if (afterEl) afterEl.classList.add('drag-above');
+    prevAssignHighlight = afterEl;
+  }
+});
+
+submissionsList.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  if (!assignDragId) return;
+  const afterEl = getDragAfterElement(submissionsList, e.clientY, '.gallery-card');
+  await assignDropCard(assignDragId, afterEl);
+});
+
+// Touch drag for assignment list
+setupTouchDrag(submissionsList, {
+  cardSelector: '.gallery-card',
+  getDropTarget: (tx, ty) => {
+    return { afterEl: getDragAfterElement(submissionsList, ty, '.gallery-card') };
+  },
+  onDrop: async (cardId, dropInfo, ty) => {
+    const afterEl = getDragAfterElement(submissionsList, ty, '.gallery-card');
+    await assignDropCard(cardId, afterEl);
+  },
+  highlightDrop: ({ afterEl }) => {
+    if (afterEl) afterEl.classList.add('drag-above');
+  },
+  clearHighlight: () => {
+    submissionsList.querySelectorAll('.gallery-card').forEach(c => c.classList.remove('drag-above'));
+  },
 });
 
 async function teacherEditSubmission(submissionId) {
@@ -1053,20 +1294,20 @@ window.deleteBoard = async function() {
 };
 
 window.downloadAll = function() {
-  const cards = document.querySelectorAll('.submission-card');
+  const cards = submissionsList.querySelectorAll('.gallery-card');
   let text = `${currentBoard.title} - 제출물 목록\n${'='.repeat(50)}\n\n`;
   cards.forEach(card => {
-    const name = card.querySelector('.submission-name')?.textContent || '';
-    const time = card.querySelector('.submission-time')?.textContent || '';
-    const type = card.querySelector('.submission-type')?.textContent || '';
-    const titleEl = card.querySelector('.submission-title-text');
-    const content = card.querySelector('.submission-content');
-    const files = card.querySelectorAll('.file-link');
-    const memo = card.querySelector('.submission-memo');
-    text += `이름: ${name}\n시간: ${time}\n유형: ${type}\n`;
+    const name = card.querySelector('.card-author')?.textContent || '';
+    const time = card.querySelector('.card-time')?.textContent || '';
+    const icon = card.querySelector('.card-type-icon')?.textContent || '';
+    const titleEl = card.querySelector('.card-title');
+    const url = card.querySelector('.card-url');
+    const textEl = card.querySelector('.card-text');
+    const memo = card.querySelector('.card-memo');
+    text += `이름: ${name}\n시간: ${time}\n유형: ${icon}\n`;
     if (titleEl) text += `제목: ${titleEl.textContent}\n`;
-    if (content) text += `내용: ${content.textContent}\n`;
-    files.forEach(f => text += `파일: ${f.textContent} - ${f.href}\n`);
+    if (url) text += `URL: ${url.textContent}\n`;
+    if (textEl) text += `내용: ${textEl.textContent}\n`;
     if (memo) text += `메모: ${memo.textContent}\n`;
     text += `${'-'.repeat(50)}\n\n`;
   });
@@ -1130,6 +1371,7 @@ function showInquiryGallery() {
   document.getElementById('inquiry-gallery-student-name').textContent = studentName;
 
   showView('inquiry-gallery-view');
+  location.hash = `inquiry/${currentBoardCode}`;
 
   if (unsubscribeInquiryGallery) unsubscribeInquiryGallery();
   unsubscribeInquiryGallery = onSnapshot(
@@ -1185,7 +1427,7 @@ function renderInquiryShelf(docs, containerId, isTeacher) {
             const time = item.createdAt ? formatDateShort(item.createdAt.toDate()) : '';
             const liked = (item.likedBy || []).includes(deviceId);
             return `
-              <div class="inquiry-card ${isMine ? 'inquiry-card-mine' : ''}" data-id="${escapeHtml(item.id)}" ${isTeacher ? `draggable="true"` : ''}>
+              <div class="inquiry-card ${isMine ? 'inquiry-card-mine' : ''}" data-id="${escapeHtml(item.id)}" data-device="${escapeHtml(item.deviceId || '')}" ${isTeacher || (isMine && STUDENT_CATEGORIES.includes(cat)) ? `draggable="true"` : ''}>
                 <div class="inquiry-card-content">${escapeHtml(item.content)}</div>
                 <div class="inquiry-card-footer">
                   <span class="inquiry-card-author">${escapeHtml(item.name)}</span>
@@ -1207,12 +1449,89 @@ function renderInquiryShelf(docs, containerId, isTeacher) {
 }
 
 // Event delegation for inquiry gallery shelf
-document.getElementById('inquiry-gallery-shelf').addEventListener('click', (e) => {
+const studentShelf = document.getElementById('inquiry-gallery-shelf');
+studentShelf.addEventListener('click', (e) => {
   const likeBtn = e.target.closest('.like-btn');
   if (likeBtn) { toggleLike(currentBoardCode, likeBtn.dataset.id); return; }
 
   const delBtn = e.target.closest('.btn-del-inquiry');
   if (delBtn) { removeSubmission(delBtn.dataset.id, { checkOwnership: true }); return; }
+});
+
+// ── Student Drag & Drop (own cards, category change only) ──
+let studentDragId = null;
+let studentDragEl = null;
+
+studentShelf.addEventListener('dragstart', (e) => {
+  const card = e.target.closest('.inquiry-card');
+  const srcCat = card?.closest('.shelf-column')?.dataset.category;
+  if (!card || card.dataset.device !== deviceId || !STUDENT_CATEGORIES.includes(srcCat)) { e.preventDefault(); return; }
+  studentDragId = card.dataset.id;
+  studentDragEl = card;
+  card.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+});
+
+studentShelf.addEventListener('dragend', () => {
+  if (studentDragEl) studentDragEl.classList.remove('dragging');
+  if (prevStudentCol) { prevStudentCol.classList.remove('shelf-drop-target'); prevStudentCol = null; }
+  studentDragId = null;
+  studentDragEl = null;
+});
+
+let prevStudentCol = null;
+studentShelf.addEventListener('dragover', (e) => {
+  if (!studentDragId) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const col = e.target.closest('.shelf-column');
+  if (col && STUDENT_CATEGORIES.includes(col.dataset.category)) {
+    if (col !== prevStudentCol) {
+      if (prevStudentCol) prevStudentCol.classList.remove('shelf-drop-target');
+      col.classList.add('shelf-drop-target');
+      prevStudentCol = col;
+    }
+  }
+});
+
+studentShelf.addEventListener('dragleave', (e) => {
+  const col = e.target.closest('.shelf-column');
+  if (col && !col.contains(e.relatedTarget)) col.classList.remove('shelf-drop-target');
+});
+
+studentShelf.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  if (!studentDragId) return;
+  const col = e.target.closest('.shelf-column');
+  if (!col) return;
+  const newCat = col.dataset.category;
+  if (!STUDENT_CATEGORIES.includes(newCat)) { toast('이 카테고리로 이동할 수 없습니다'); return; }
+  try {
+    await updateDoc(doc(db, 'boards', currentBoardCode, 'submissions', studentDragId), { category: newCat });
+  } catch (err) { console.error(err); toast('이동 실패'); }
+});
+
+// Touch drag for student shelf (own cards only)
+setupTouchDrag(studentShelf, {
+  cardSelector: '.inquiry-card',
+  canDrag: (card) => card.dataset.device === deviceId && STUDENT_CATEGORIES.includes(card.closest('.shelf-column')?.dataset.category),
+  getDropTarget: (tx, ty) => {
+    const col = document.elementFromPoint(tx, ty)?.closest('.shelf-column');
+    if (!col || !STUDENT_CATEGORIES.includes(col.dataset.category)) return null;
+    return { col };
+  },
+  onDrop: async (cardId, { col }) => {
+    // Verify ownership
+    const card = studentShelf.querySelector(`.inquiry-card[data-id="${cardId}"]`);
+    if (!card || card.dataset.device !== deviceId) return;
+    try {
+      await updateDoc(doc(db, 'boards', currentBoardCode, 'submissions', cardId), { category: col.dataset.category });
+    } catch (err) { console.error(err); toast('이동 실패'); }
+  },
+  highlightDrop: ({ col }) => { col.classList.add('shelf-drop-target'); },
+  clearHighlight: () => {
+    studentShelf.querySelectorAll('.shelf-column').forEach(c => c.classList.remove('shelf-drop-target'));
+  },
 });
 
 // Event delegation for inquiry board shelf (teacher)
@@ -1240,26 +1559,31 @@ teacherShelf.addEventListener('dragstart', (e) => {
 
 teacherShelf.addEventListener('dragend', (e) => {
   if (draggedEl) draggedEl.classList.remove('dragging');
-  teacherShelf.querySelectorAll('.shelf-column').forEach(col => col.classList.remove('shelf-drop-target'));
-  teacherShelf.querySelectorAll('.inquiry-card').forEach(c => c.classList.remove('drag-above'));
+  if (prevTeacherCol) { prevTeacherCol.classList.remove('shelf-drop-target'); prevTeacherCol = null; }
+  if (prevTeacherCard) { prevTeacherCard.classList.remove('drag-above'); prevTeacherCard = null; }
   draggedId = null;
   draggedEl = null;
 });
 
+let prevTeacherCol = null;
+let prevTeacherCard = null;
 teacherShelf.addEventListener('dragover', (e) => {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
   const col = e.target.closest('.shelf-column');
-  if (col) {
-    teacherShelf.querySelectorAll('.shelf-column').forEach(c => c.classList.remove('shelf-drop-target'));
-    col.classList.add('shelf-drop-target');
+  if (col !== prevTeacherCol) {
+    if (prevTeacherCol) prevTeacherCol.classList.remove('shelf-drop-target');
+    if (col) col.classList.add('shelf-drop-target');
+    prevTeacherCol = col;
   }
-  // Show insertion indicator between cards
   const cardsContainer = e.target.closest('.shelf-cards');
   if (cardsContainer) {
-    cardsContainer.querySelectorAll('.inquiry-card').forEach(c => c.classList.remove('drag-above'));
     const closest = getDragAfterElement(cardsContainer, e.clientY);
-    if (closest) closest.classList.add('drag-above');
+    if (closest !== prevTeacherCard) {
+      if (prevTeacherCard) prevTeacherCard.classList.remove('drag-above');
+      if (closest) closest.classList.add('drag-above');
+      prevTeacherCard = closest;
+    }
   }
 });
 
@@ -1273,58 +1597,47 @@ teacherShelf.addEventListener('drop', async (e) => {
   if (!draggedId) return;
   const col = e.target.closest('.shelf-column');
   if (!col) return;
+  await inquiryDropCard(draggedId, col, e.clientY);
+});
+
+// Track sort orders for inquiry drop position calculation
+let cardSortOrders = {};
+
+/** Shared drop logic for inquiry shelf (mouse + touch) */
+async function inquiryDropCard(cardId, col, clientY) {
   const newCategory = col.dataset.category;
-
-  // Determine sort order based on drop position
   const cardsContainer = col.querySelector('.shelf-cards');
-  const afterEl = getDragAfterElement(cardsContainer, e.clientY);
-  const cardEls = [...cardsContainer.querySelectorAll('.inquiry-card:not(.dragging)')];
-  let sortOrder;
-  if (cardEls.length === 0) {
-    sortOrder = Date.now();
-  } else if (!afterEl) {
-    // Dropped at bottom
-    const lastId = cardEls[cardEls.length - 1].dataset.id;
-    const lastOrder = cardSortOrders[lastId] || 0;
-    sortOrder = lastOrder - 1;
-  } else {
-    const afterIdx = cardEls.indexOf(afterEl);
-    const afterOrder = cardSortOrders[afterEl.dataset.id] || 0;
-    if (afterIdx === 0) {
-      sortOrder = afterOrder + 1;
-    } else {
-      const beforeEl = cardEls[afterIdx - 1];
-      const beforeOrder = cardSortOrders[beforeEl.dataset.id] || 0;
-      sortOrder = (beforeOrder + afterOrder) / 2;
-    }
-  }
-
+  const afterEl = getDragAfterElement(cardsContainer, clientY);
+  const sortOrder = calcDropSortOrder(cardsContainer, afterEl, cardSortOrders, '.inquiry-card');
   try {
-    await updateDoc(doc(db, 'boards', currentBoardCode, 'submissions', draggedId), {
+    await updateDoc(doc(db, 'boards', currentBoardCode, 'submissions', cardId), {
       category: newCategory,
       sortOrder
     });
   } catch (err) { console.error(err); toast('이동 실패'); }
-});
-
-/** Find the card element that the dragged item should be placed before */
-function getDragAfterElement(container, y) {
-  const cards = [...container.querySelectorAll('.inquiry-card:not(.dragging)')];
-  let closest = null;
-  let closestOffset = Number.NEGATIVE_INFINITY;
-  cards.forEach(card => {
-    const box = card.getBoundingClientRect();
-    const offset = y - box.top - box.height / 2;
-    if (offset < 0 && offset > closestOffset) {
-      closestOffset = offset;
-      closest = card;
-    }
-  });
-  return closest;
 }
 
-// Track sort orders for drop position calculation
-let cardSortOrders = {};
+// Touch drag for inquiry shelf
+setupTouchDrag(teacherShelf, {
+  cardSelector: '.inquiry-card',
+  getDropTarget: (tx, ty) => {
+    const col = document.elementFromPoint(tx, ty)?.closest('.shelf-column');
+    if (!col) return null;
+    const afterEl = getDragAfterElement(col.querySelector('.shelf-cards'), ty);
+    return { col, afterEl };
+  },
+  onDrop: async (cardId, { col }, ty) => {
+    await inquiryDropCard(cardId, col, ty);
+  },
+  highlightDrop: ({ col, afterEl }) => {
+    col.classList.add('shelf-drop-target');
+    if (afterEl) afterEl.classList.add('drag-above');
+  },
+  clearHighlight: () => {
+    teacherShelf.querySelectorAll('.shelf-column').forEach(c => c.classList.remove('shelf-drop-target'));
+    teacherShelf.querySelectorAll('.inquiry-card').forEach(c => c.classList.remove('drag-above'));
+  },
+});
 
 // ── Like Toggle ──
 async function toggleLike(boardCode, submissionId) {
@@ -1360,6 +1673,7 @@ window.openInquirySubmitForm = function() {
   window._selectedInquiryCategory = STUDENT_CATEGORIES[0];
   document.getElementById('inquiry-question-input').value = '';
   document.getElementById('inquiry-submit-modal').style.display = 'flex';
+  openModalHistory();
   setTimeout(() => document.getElementById('inquiry-question-input').focus(), 100);
 };
 
@@ -1368,9 +1682,7 @@ window.selectInquiryCategory = function(cat) {
   document.querySelectorAll('.cat-select-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
 };
 
-window.closeInquirySubmitModal = function() {
-  document.getElementById('inquiry-submit-modal').style.display = 'none';
-};
+window.closeInquirySubmitModal = function() { closeModal('inquiry-submit-modal'); };
 
 window.submitInquiry = async function() {
   const content = document.getElementById('inquiry-question-input').value.trim();
@@ -1421,6 +1733,41 @@ function showInquiryBoard(code) {
   );
 }
 
+// ── Modal ↔ History (back button closes modals) ──
+const MODAL_IDS = ['detail-modal', 'submit-modal', 'inquiry-submit-modal'];
+
+function openModalHistory() {
+  history.pushState({ modal: true }, '');
+}
+
+/** Close a specific modal (or all). Handles history sync. */
+function closeModal(modalId) {
+  const ids = modalId ? [modalId] : MODAL_IDS;
+  let closed = false;
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el.style.display === 'flex') { el.style.display = 'none'; closed = true; }
+  });
+  if (!closed) return;
+  existingFiles = null;
+  teacherEditMode = false;
+  if (history.state?.modal) history.back();
+}
+
+function isAnyModalOpen() {
+  return MODAL_IDS.some(id => document.getElementById(id).style.display === 'flex');
+}
+
+window.addEventListener('popstate', () => {
+  if (isAnyModalOpen()) {
+    // popstate already popped the modal state — just hide modals, don't call history.back()
+    MODAL_IDS.forEach(id => { document.getElementById(id).style.display = 'none'; });
+    existingFiles = null;
+    teacherEditMode = false;
+    return;
+  }
+  handleRoute();
+});
+
 // ── Init ──
 window.openBoard = openBoard;
-window.addEventListener('hashchange', handleRoute);

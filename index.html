@@ -40,7 +40,7 @@
         <div class="header-left"><h1>📋 EasyUp</h1></div>
         <div class="header-right">
           <span id="user-name" class="user-name"></span>
-          <button class="btn btn-small" id="btn-manage-users" onclick="showView('users-view')" style="display:none">👥 회원관리</button>
+          <button class="btn btn-small" id="btn-manage-users" onclick="location.hash='users'" style="display:none">👥 회원관리</button>
           <button class="btn btn-small" onclick="googleLogout()">로그아웃</button>
         </div>
       </header>
@@ -314,7 +314,7 @@
           <button class="btn btn-small btn-danger" onclick="deleteBoard()">🗑 보드 삭제</button>
         </div>
       </div>
-      <div id="submissions-list" class="submissions-list">
+      <div id="submissions-list" class="gallery-grid">
         <div class="empty-state">아직 제출물이 없습니다</div>
       </div>
     </div>
