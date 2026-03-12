@@ -27,6 +27,17 @@ const TYPE_CONFIG = {
   file: { icon: '📎', label: '📎 파일',   cls: 'type-file' }
 };
 
+const INQUIRY_CATEGORIES = {
+  factual:    { icon: '🔍', label: '사실적 질문', color: '#dbeafe' },
+  conceptual: { icon: '💡', label: '개념적 질문', color: '#dcfce7' },
+  debatable:  { icon: '⚖️', label: '논쟁적 질문', color: '#fef3c7' },
+  featured:   { icon: '⭐', label: '이번 주 탐구 질문', color: '#e8d5e8' },
+  resolved:   { icon: '✅', label: '해결된 질문', color: '#f1f5f9' },
+};
+
+// Student-selectable categories (excluding teacher-only ones)
+const STUDENT_CATEGORIES = ['factual', 'conceptual', 'debatable'];
+
 // Cached DateTimeFormat instances
 const dtfFull  = new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const dtfShort = new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric' });
@@ -55,6 +66,31 @@ function toast(msg) {
   el.textContent = msg;
   el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+/** Custom confirm modal (replaces browser confirm) */
+function showConfirm(message, okLabel = '삭제') {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('confirm-modal');
+    document.getElementById('confirm-message').textContent = message;
+    const okBtn = document.getElementById('confirm-ok');
+    okBtn.textContent = okLabel;
+    modal.style.display = 'flex';
+
+    function cleanup(result) {
+      modal.style.display = 'none';
+      okBtn.removeEventListener('click', onOk);
+      document.getElementById('confirm-cancel').removeEventListener('click', onCancel);
+      modal.querySelector('.modal-overlay').removeEventListener('click', onCancel);
+      resolve(result);
+    }
+    function onOk() { cleanup(true); }
+    function onCancel() { cleanup(false); }
+
+    okBtn.addEventListener('click', onOk);
+    document.getElementById('confirm-cancel').addEventListener('click', onCancel);
+    modal.querySelector('.modal-overlay').addEventListener('click', onCancel);
+  });
 }
 
 /** Set text and show/hide element */
@@ -125,6 +161,9 @@ let editingSubmissionId = null;
 let existingFiles = null;
 let studentName = '';
 let teacherEditMode = false; // true when teacher edits from board-view
+let selectedBoardType = 'assignment'; // 'assignment' | 'inquiry'
+let unsubscribeInquiryGallery = null;
+let unsubscribeInquiryBoard = null;
 
 // ── Device ID ──
 function getDeviceId() {
@@ -141,8 +180,10 @@ const deviceId = getDeviceId();
 window.showView = function(viewId) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById(viewId).classList.add('active');
-  if (unsubscribe && viewId !== 'board-view') { unsubscribe(); unsubscribe = null; }
+  if (unsubscribe && viewId !== 'board-view' && viewId !== 'inquiry-board-view') { unsubscribe(); unsubscribe = null; }
   if (unsubscribeGallery && viewId !== 'gallery-view') { unsubscribeGallery(); unsubscribeGallery = null; }
+  if (unsubscribeInquiryGallery && viewId !== 'inquiry-gallery-view') { unsubscribeInquiryGallery(); unsubscribeInquiryGallery = null; }
+  if (unsubscribeInquiryBoard && viewId !== 'inquiry-board-view') { unsubscribeInquiryBoard(); unsubscribeInquiryBoard = null; }
   if (viewId === 'users-view') loadUsers();
 };
 
@@ -388,6 +429,12 @@ window.changeStudentName = function() { showNameView(); };
 //  STUDENT: GALLERY BOARD
 // ══════════════════════════════════════
 function showGallery() {
+  // Branch by board type
+  if (currentBoard.type === 'inquiry') {
+    showInquiryGallery();
+    return;
+  }
+
   document.getElementById('gallery-title').textContent = currentBoard.title;
   setTextVisibility('gallery-desc', currentBoard.description);
   document.getElementById('gallery-student-name').textContent = studentName;
@@ -720,13 +767,16 @@ async function editMySubmission(submissionId) {
 }
 
 async function removeSubmission(id, { checkOwnership = false } = {}) {
-  if (!confirm('삭제하시겠습니까?')) return;
   try {
     const sub = await getDoc(doc(db, 'boards', currentBoardCode, 'submissions', id));
-    if (sub.exists()) {
-      if (checkOwnership && sub.data().deviceId !== deviceId) { toast('삭제 권한이 없습니다'); return; }
-      await deleteStorageFiles(sub.data().files);
-    }
+    if (!sub.exists()) return;
+    const data = sub.data();
+    if (checkOwnership && data.deviceId !== deviceId) { toast('삭제 권한이 없습니다'); return; }
+
+    const preview = truncate(data.content || data.title || '(내용 없음)', 50);
+    if (!await showConfirm(`"${preview}"\n\n삭제하시겠습니까?`)) return;
+
+    await deleteStorageFiles(data.files);
     await deleteDoc(doc(db, 'boards', currentBoardCode, 'submissions', id));
     toast('삭제됨');
   } catch (e) { toast('삭제 실패'); }
@@ -782,8 +832,9 @@ function renderDashboard() {
       dlText = dl.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
       if (new Date() > dl) dlClass = 'expired-text';
     }
+    const typeBadge = b.type === 'inquiry' ? '<span class="board-type-badge inquiry-badge">🔬</span>' : '<span class="board-type-badge assignment-badge">📋</span>';
     return `<tr class="board-row" data-code="${escapeHtml(b.code)}">
-      <td class="board-title-cell"><strong>${escapeHtml(b.title)}</strong>
+      <td class="board-title-cell">${typeBadge}<strong>${escapeHtml(b.title)}</strong>
         ${b.description ? `<span class="board-desc-preview">${escapeHtml(truncate(b.description, 40))}</span>` : ''}</td>
       <td class="col-code"><span class="code-chip">${escapeHtml(b.code)}</span></td>
       <td class="col-count"><span class="count-chip">${b.submissionCount}</span></td>
@@ -837,7 +888,7 @@ async function deleteBoardData(code) {
 }
 
 async function deleteBoardFromList(code, title) {
-  if (!confirm(`"${title}" 보드를 삭제하시겠습니까?`)) return;
+  if (!await showConfirm(`"${title}" 보드를 삭제하시겠습니까?`)) return;
   try {
     await deleteBoardData(code);
     allBoards = allBoards.filter(b => b.code !== code);
@@ -856,25 +907,43 @@ function generateCode() {
   return code;
 }
 
+window.selectBoardType = function(type) {
+  selectedBoardType = type;
+  document.querySelectorAll('.type-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.type === type));
+  document.getElementById('assignment-options').style.display = type === 'assignment' ? 'block' : 'none';
+  document.getElementById('inquiry-options').style.display = type === 'inquiry' ? 'block' : 'none';
+  // Update placeholder
+  const titleInput = document.getElementById('board-title');
+  titleInput.placeholder = type === 'inquiry' ? '예: 3단원 탐구 질문' : '예: 3월 독서감상문';
+};
+
 window.createBoard = async function() {
   if (!currentUser) return;
   const title = document.getElementById('board-title').value.trim();
-  if (!title) { toast('과제 제목을 입력하세요'); return; }
+  if (!title) { toast('제목을 입력하세요'); return; }
   const desc = document.getElementById('board-desc').value.trim();
   const deadline = document.getElementById('board-deadline').value;
-  const allowUrl = document.getElementById('allow-url').checked;
-  const allowText = document.getElementById('allow-text').checked;
-  const allowFile = document.getElementById('allow-file').checked;
-  if (!allowUrl && !allowText && !allowFile) { toast('최소 하나의 제출 방식을 선택하세요'); return; }
 
-  // 6-char code from 30-char alphabet = 729M combinations, collision negligible
   const code = generateCode();
+  const boardData = {
+    title, description: desc, deadline: deadline || null,
+    type: selectedBoardType,
+    code, ownerUid: currentUser.uid, ownerName: currentUser.displayName || currentUser.email,
+    createdAt: serverTimestamp()
+  };
+
+  if (selectedBoardType === 'assignment') {
+    const allowUrl = document.getElementById('allow-url').checked;
+    const allowText = document.getElementById('allow-text').checked;
+    const allowFile = document.getElementById('allow-file').checked;
+    if (!allowUrl && !allowText && !allowFile) { toast('최소 하나의 제출 방식을 선택하세요'); return; }
+    Object.assign(boardData, { allowUrl, allowText, allowFile });
+  } else {
+    boardData.categories = Object.keys(INQUIRY_CATEGORIES);
+  }
 
   try {
-    await setDoc(doc(db, 'boards', code), {
-      title, description: desc, deadline: deadline || null, allowUrl, allowText, allowFile,
-      code, ownerUid: currentUser.uid, ownerName: currentUser.displayName || currentUser.email, createdAt: serverTimestamp()
-    });
+    await setDoc(doc(db, 'boards', code), boardData);
     currentBoardCode = code;
     document.getElementById('created-code').textContent = code;
     showView('created-view');
@@ -902,6 +971,12 @@ async function openBoard(code) {
     currentBoard = boardDoc.data();
     currentBoard.code = code;
     currentBoardCode = code;
+
+    // Branch by board type
+    if (currentBoard.type === 'inquiry') {
+      showInquiryBoard(code);
+      return;
+    }
 
     document.getElementById('board-title-display').textContent = currentBoard.title;
     document.getElementById('board-code-badge').textContent = `코드: ${code}`;
@@ -969,7 +1044,7 @@ async function teacherEditSubmission(submissionId) {
 }
 
 window.deleteBoard = async function() {
-  if (!confirm(`"${currentBoard.title}" 보드를 삭제하시겠습니까?`)) return;
+  if (!await showConfirm(`"${currentBoard.title}" 보드를 삭제하시겠습니까?`)) return;
   try {
     await deleteBoardData(currentBoardCode);
     toast('삭제됨');
@@ -1045,6 +1120,306 @@ window.showQrModal = openQrPopup;
 window.showBoardQr = function() {
   if (currentBoard) openQrPopup(currentBoard.code, currentBoard.title);
 };
+
+// ══════════════════════════════════════
+//  INQUIRY: STUDENT GALLERY (Shelf)
+// ══════════════════════════════════════
+function showInquiryGallery() {
+  document.getElementById('inquiry-gallery-title').textContent = currentBoard.title;
+  setTextVisibility('inquiry-gallery-desc', currentBoard.description);
+  document.getElementById('inquiry-gallery-student-name').textContent = studentName;
+
+  showView('inquiry-gallery-view');
+
+  if (unsubscribeInquiryGallery) unsubscribeInquiryGallery();
+  unsubscribeInquiryGallery = onSnapshot(
+    query(collection(db, 'boards', currentBoardCode, 'submissions'), orderBy('createdAt', 'desc')),
+    (snapshot) => renderInquiryShelf(snapshot.docs, 'inquiry-gallery-shelf', false)
+  );
+}
+
+function renderInquiryShelf(docs, containerId, isTeacher) {
+  const container = document.getElementById(containerId);
+  const categories = currentBoard.categories || Object.keys(INQUIRY_CATEGORIES);
+
+  // Group by category
+  const grouped = {};
+  categories.forEach(cat => grouped[cat] = []);
+  docs.forEach(d => {
+    const data = d.data();
+    const cat = data.category || 'factual';
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push({ id: d.id, ...data });
+  });
+
+  // Sort within each category: by sortOrder (desc) then createdAt (desc)
+  Object.values(grouped).forEach(items => {
+    items.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
+  });
+
+  // Build sortOrder map for drag-drop position calculation
+  if (isTeacher) {
+    cardSortOrders = {};
+    Object.values(grouped).forEach(items => {
+      items.forEach(item => { cardSortOrders[item.id] = item.sortOrder || 0; });
+    });
+  }
+
+  // Count display
+  if (isTeacher) {
+    document.getElementById('inquiry-submission-count').textContent = `총 ${docs.length}개 질문`;
+  }
+
+  container.innerHTML = categories.map(cat => {
+    const cfg = INQUIRY_CATEGORIES[cat] || {};
+    const items = grouped[cat] || [];
+    return `
+      <div class="shelf-column" data-category="${cat}">
+        <div class="shelf-header" style="background:${cfg.color}">
+          <span>${cfg.icon} ${cfg.label}</span>
+          <span class="shelf-count">${items.length}</span>
+        </div>
+        <div class="shelf-cards">
+          ${items.length === 0 ? '<div class="shelf-empty">아직 질문이 없습니다</div>' : items.map(item => {
+            const isMine = item.deviceId === deviceId;
+            const time = item.createdAt ? formatDateShort(item.createdAt.toDate()) : '';
+            const liked = (item.likedBy || []).includes(deviceId);
+            return `
+              <div class="inquiry-card ${isMine ? 'inquiry-card-mine' : ''}" data-id="${escapeHtml(item.id)}" ${isTeacher ? `draggable="true"` : ''}>
+                <div class="inquiry-card-content">${escapeHtml(item.content)}</div>
+                <div class="inquiry-card-footer">
+                  <span class="inquiry-card-author">${escapeHtml(item.name)}</span>
+                  <span class="inquiry-card-time">${time}</span>
+                </div>
+                <div class="inquiry-card-actions">
+                  <button class="like-btn ${liked ? 'liked' : ''}" data-id="${escapeHtml(item.id)}">
+                    ${liked ? '❤️' : '🤍'} <span class="like-count">${item.likes || 0}</span>
+                  </button>
+                  ${isTeacher ? `
+                    <button class="btn-icon btn-icon-danger btn-del-inquiry" data-id="${escapeHtml(item.id)}" title="삭제">🗑</button>
+                  ` : isMine ? `<button class="btn-icon btn-icon-danger btn-del-inquiry" data-id="${escapeHtml(item.id)}" title="삭제">🗑</button>` : ''}
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// Event delegation for inquiry gallery shelf
+document.getElementById('inquiry-gallery-shelf').addEventListener('click', (e) => {
+  const likeBtn = e.target.closest('.like-btn');
+  if (likeBtn) { toggleLike(currentBoardCode, likeBtn.dataset.id); return; }
+
+  const delBtn = e.target.closest('.btn-del-inquiry');
+  if (delBtn) { removeSubmission(delBtn.dataset.id, { checkOwnership: true }); return; }
+});
+
+// Event delegation for inquiry board shelf (teacher)
+document.getElementById('inquiry-board-shelf').addEventListener('click', (e) => {
+  const likeBtn = e.target.closest('.like-btn');
+  if (likeBtn) { e.stopPropagation(); return; }
+
+  const delBtn = e.target.closest('.btn-del-inquiry');
+  if (delBtn) { removeSubmission(delBtn.dataset.id); return; }
+});
+
+// ── Drag & Drop (Teacher Board) ──
+const teacherShelf = document.getElementById('inquiry-board-shelf');
+let draggedId = null;
+let draggedEl = null;
+
+teacherShelf.addEventListener('dragstart', (e) => {
+  const card = e.target.closest('.inquiry-card');
+  if (!card) return;
+  draggedId = card.dataset.id;
+  draggedEl = card;
+  card.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+});
+
+teacherShelf.addEventListener('dragend', (e) => {
+  if (draggedEl) draggedEl.classList.remove('dragging');
+  teacherShelf.querySelectorAll('.shelf-column').forEach(col => col.classList.remove('shelf-drop-target'));
+  teacherShelf.querySelectorAll('.inquiry-card').forEach(c => c.classList.remove('drag-above'));
+  draggedId = null;
+  draggedEl = null;
+});
+
+teacherShelf.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const col = e.target.closest('.shelf-column');
+  if (col) {
+    teacherShelf.querySelectorAll('.shelf-column').forEach(c => c.classList.remove('shelf-drop-target'));
+    col.classList.add('shelf-drop-target');
+  }
+  // Show insertion indicator between cards
+  const cardsContainer = e.target.closest('.shelf-cards');
+  if (cardsContainer) {
+    cardsContainer.querySelectorAll('.inquiry-card').forEach(c => c.classList.remove('drag-above'));
+    const closest = getDragAfterElement(cardsContainer, e.clientY);
+    if (closest) closest.classList.add('drag-above');
+  }
+});
+
+teacherShelf.addEventListener('dragleave', (e) => {
+  const col = e.target.closest('.shelf-column');
+  if (col && !col.contains(e.relatedTarget)) col.classList.remove('shelf-drop-target');
+});
+
+teacherShelf.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  if (!draggedId) return;
+  const col = e.target.closest('.shelf-column');
+  if (!col) return;
+  const newCategory = col.dataset.category;
+
+  // Determine sort order based on drop position
+  const cardsContainer = col.querySelector('.shelf-cards');
+  const afterEl = getDragAfterElement(cardsContainer, e.clientY);
+  const cardEls = [...cardsContainer.querySelectorAll('.inquiry-card:not(.dragging)')];
+  let sortOrder;
+  if (cardEls.length === 0) {
+    sortOrder = Date.now();
+  } else if (!afterEl) {
+    // Dropped at bottom
+    const lastId = cardEls[cardEls.length - 1].dataset.id;
+    const lastOrder = cardSortOrders[lastId] || 0;
+    sortOrder = lastOrder - 1;
+  } else {
+    const afterIdx = cardEls.indexOf(afterEl);
+    const afterOrder = cardSortOrders[afterEl.dataset.id] || 0;
+    if (afterIdx === 0) {
+      sortOrder = afterOrder + 1;
+    } else {
+      const beforeEl = cardEls[afterIdx - 1];
+      const beforeOrder = cardSortOrders[beforeEl.dataset.id] || 0;
+      sortOrder = (beforeOrder + afterOrder) / 2;
+    }
+  }
+
+  try {
+    await updateDoc(doc(db, 'boards', currentBoardCode, 'submissions', draggedId), {
+      category: newCategory,
+      sortOrder
+    });
+  } catch (err) { console.error(err); toast('이동 실패'); }
+});
+
+/** Find the card element that the dragged item should be placed before */
+function getDragAfterElement(container, y) {
+  const cards = [...container.querySelectorAll('.inquiry-card:not(.dragging)')];
+  let closest = null;
+  let closestOffset = Number.NEGATIVE_INFINITY;
+  cards.forEach(card => {
+    const box = card.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > closestOffset) {
+      closestOffset = offset;
+      closest = card;
+    }
+  });
+  return closest;
+}
+
+// Track sort orders for drop position calculation
+let cardSortOrders = {};
+
+// ── Like Toggle ──
+async function toggleLike(boardCode, submissionId) {
+  const subRef = doc(db, 'boards', boardCode, 'submissions', submissionId);
+  try {
+    const subDoc = await getDoc(subRef);
+    if (!subDoc.exists()) return;
+    const data = subDoc.data();
+    const likedBy = data.likedBy || [];
+    const isLiked = likedBy.includes(deviceId);
+    await updateDoc(subRef, {
+      likes: isLiked ? Math.max((data.likes || 1) - 1, 0) : (data.likes || 0) + 1,
+      likedBy: isLiked ? likedBy.filter(id => id !== deviceId) : [...likedBy, deviceId]
+    });
+  } catch (e) { console.error(e); toast('오류 발생'); }
+}
+
+// ── Category Change (Teacher) ──
+async function changeCategory(boardCode, submissionId, newCategory) {
+  try {
+    await updateDoc(doc(db, 'boards', boardCode, 'submissions', submissionId), { category: newCategory });
+    toast('카테고리 변경됨');
+  } catch (e) { console.error(e); toast('변경 실패'); }
+}
+
+// ── Inquiry Submit Modal ──
+window.openInquirySubmitForm = function() {
+  const selectContainer = document.getElementById('inquiry-category-select');
+  selectContainer.innerHTML = STUDENT_CATEGORIES.map((cat, i) => {
+    const cfg = INQUIRY_CATEGORIES[cat];
+    return `<button class="cat-select-btn ${i === 0 ? 'active' : ''}" data-cat="${cat}" style="background:${cfg.color}" onclick="selectInquiryCategory('${cat}')">${cfg.icon} ${cfg.label}</button>`;
+  }).join('');
+  window._selectedInquiryCategory = STUDENT_CATEGORIES[0];
+  document.getElementById('inquiry-question-input').value = '';
+  document.getElementById('inquiry-submit-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('inquiry-question-input').focus(), 100);
+};
+
+window.selectInquiryCategory = function(cat) {
+  window._selectedInquiryCategory = cat;
+  document.querySelectorAll('.cat-select-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
+};
+
+window.closeInquirySubmitModal = function() {
+  document.getElementById('inquiry-submit-modal').style.display = 'none';
+};
+
+window.submitInquiry = async function() {
+  const content = document.getElementById('inquiry-question-input').value.trim();
+  if (!content) { toast('질문 내용을 입력하세요'); return; }
+
+  const btn = document.getElementById('inquiry-submit-btn');
+  btn.disabled = true;
+  btn.textContent = '올리는 중...';
+
+  try {
+    const submissionId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    await setDoc(doc(db, 'boards', currentBoardCode, 'submissions', submissionId), {
+      name: studentName,
+      content,
+      category: window._selectedInquiryCategory || 'factual',
+      likes: 0,
+      likedBy: [],
+      deviceId,
+      boardCode: currentBoardCode,
+      createdAt: serverTimestamp()
+    });
+    toast('질문이 등록되었습니다!');
+    closeInquirySubmitModal();
+  } catch (e) {
+    console.error(e);
+    toast('오류: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '질문 올리기';
+  }
+};
+
+// ══════════════════════════════════════
+//  INQUIRY: TEACHER BOARD VIEW
+// ══════════════════════════════════════
+function showInquiryBoard(code) {
+  document.getElementById('inquiry-board-title-display').textContent = currentBoard.title;
+  document.getElementById('inquiry-board-code-badge').textContent = `코드: ${code}`;
+  setTextVisibility('inquiry-board-desc-display', currentBoard.description);
+
+  showView('inquiry-board-view');
+  location.hash = `board/${code}`;
+
+  if (unsubscribeInquiryBoard) unsubscribeInquiryBoard();
+  unsubscribeInquiryBoard = onSnapshot(
+    query(collection(db, 'boards', code, 'submissions'), orderBy('createdAt', 'desc')),
+    (snap) => renderInquiryShelf(snap.docs, 'inquiry-board-shelf', true)
+  );
+}
 
 // ── Init ──
 window.openBoard = openBoard;

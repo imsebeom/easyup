@@ -280,6 +280,63 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); box-sha
 .toast { position:fixed; bottom:30px; left:50%; transform:translateX(-50%) translateY(100px); background:var(--text); color:#fff; padding:12px 24px; border-radius:8px; font-size:.9rem; opacity:0; transition:all .3s; z-index:1000; white-space:nowrap; }
 .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 
+/* ── Board Type Toggle ── */
+.board-type-toggle { display:flex; gap:8px; }
+.type-toggle-btn { flex:1; padding:12px; border:2px solid var(--border); border-radius:8px; background:var(--card-bg); cursor:pointer; font-size:.95rem; font-weight:600; text-align:center; transition:all .15s; }
+.type-toggle-btn:hover { border-color:var(--primary); background:var(--primary-light); }
+.type-toggle-btn.active { border-color:var(--primary); background:var(--primary-light); color:var(--primary); }
+
+.category-preview { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.cat-chip { display:inline-block; padding:4px 10px; border-radius:12px; font-size:.8rem; font-weight:600; }
+.form-hint { font-size:.8rem; color:var(--text-light); margin-top:8px; }
+
+.board-type-badge { font-size:.85rem; margin-right:6px; vertical-align:middle; }
+
+/* ── Shelf Layout (Inquiry) ── */
+/* When inquiry views are active, expand #app to full width */
+#app:has(#inquiry-gallery-view.active), #app:has(#inquiry-board-view.active) { max-width:none; }
+.shelf-container { display:flex; gap:10px; padding-bottom:16px; min-height:300px; }
+.shelf-column { flex:1; min-width:0; display:flex; flex-direction:column; }
+.shelf-header { padding:10px 14px; border-radius:8px 8px 0 0; font-weight:700; font-size:.9rem; display:flex; justify-content:space-between; align-items:center; }
+.shelf-count { font-size:.75rem; background:rgba(0,0,0,.1); padding:2px 8px; border-radius:10px; }
+.shelf-cards { flex:1; display:flex; flex-direction:column; gap:8px; padding:8px; background:var(--bg); border-radius:0 0 8px 8px; border:1px solid var(--border); border-top:none; min-height:60px; }
+.shelf-empty { text-align:center; padding:20px 8px; color:var(--text-light); font-size:.8rem; }
+
+/* ── Inquiry Card ── */
+.inquiry-card { background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:12px; box-shadow:var(--shadow); transition:all .15s; }
+.inquiry-card:hover { box-shadow:var(--shadow-lg); }
+.inquiry-card-mine { border-color:var(--primary); border-width:2px; }
+.inquiry-card-content { font-size:.9rem; line-height:1.5; margin-bottom:8px; word-break:break-word; }
+.inquiry-card-footer { display:flex; justify-content:space-between; font-size:.75rem; color:var(--text-light); margin-bottom:6px; }
+.inquiry-card-author { font-weight:600; }
+.inquiry-card-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+
+/* ── Like Button ── */
+.like-btn { background:none; border:1px solid var(--border); border-radius:16px; padding:3px 10px; cursor:pointer; font-size:.8rem; display:inline-flex; align-items:center; gap:4px; transition:all .15s; }
+.like-btn:hover { border-color:var(--primary); background:var(--primary-light); }
+.like-btn.liked { border-color:#ef4444; background:#fee2e2; }
+.like-count { font-weight:600; }
+
+/* ── Drag & Drop (Teacher) ── */
+.inquiry-card[draggable="true"] { cursor:grab; }
+.inquiry-card[draggable="true"]:active { cursor:grabbing; }
+.inquiry-card.dragging { opacity:.3; }
+.shelf-column.shelf-drop-target .shelf-cards { background:var(--primary-light); border-color:var(--primary); }
+.inquiry-card.drag-above { border-top:3px solid var(--primary); margin-top:-1px; }
+
+/* ── Inquiry Category Select (Student Modal) ── */
+.category-select { display:flex; flex-wrap:wrap; gap:6px; }
+.cat-select-btn { padding:8px 14px; border:2px solid transparent; border-radius:8px; cursor:pointer; font-size:.85rem; font-weight:600; transition:all .15s; }
+.cat-select-btn:hover { opacity:.8; }
+.cat-select-btn.active { border-color:var(--text); box-shadow:0 0 0 2px rgba(0,0,0,.1); }
+
+/* ── Confirm Modal ── */
+.confirm-modal-content { max-width:360px; text-align:center; }
+.confirm-message { font-size:1rem; line-height:1.6; margin-bottom:20px; word-break:break-word; white-space:pre-wrap; }
+.confirm-actions { display:flex; gap:10px; justify-content:center; }
+.btn-danger-fill { background:var(--danger); color:#fff; padding:10px 24px; border:none; border-radius:8px; font-size:.95rem; font-weight:600; cursor:pointer; }
+.btn-danger-fill:hover { background:#dc2626; }
+
 /* Responsive */
 @media (max-width:640px) {
   .dashboard-header { flex-direction:column; align-items:flex-start; gap:8px; }
@@ -297,4 +354,7 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); box-sha
   .gallery-header { flex-direction:column; }
   .fab { bottom:20px; right:20px; padding:12px 20px; font-size:.9rem; }
   .modal-content { width:95%; }
+  .shelf-container { overflow-x:auto; }
+  .shelf-column { min-width:200px; flex-shrink:0; }
+  .category-select { flex-direction:column; }
 }
