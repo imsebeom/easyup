@@ -1293,6 +1293,73 @@ window.deleteBoard = async function() {
   } catch (e) { toast('삭제 실패'); }
 };
 
+// ── Edit Board ──
+window.openEditBoardModal = function() {
+  if (!currentBoard) return;
+  document.getElementById('edit-board-title').value = currentBoard.title || '';
+  document.getElementById('edit-board-desc').value = currentBoard.description || '';
+  document.getElementById('edit-board-deadline').value = currentBoard.deadline || '';
+
+  const isAssignment = currentBoard.type !== 'inquiry';
+  document.getElementById('edit-assignment-options').style.display = isAssignment ? 'block' : 'none';
+  if (isAssignment) {
+    document.getElementById('edit-allow-url').checked = currentBoard.allowUrl !== false;
+    document.getElementById('edit-allow-text').checked = currentBoard.allowText !== false;
+    document.getElementById('edit-allow-file').checked = currentBoard.allowFile !== false;
+  }
+
+  document.getElementById('edit-board-modal').style.display = 'flex';
+  openModalHistory();
+};
+
+window.closeEditBoardModal = function() { closeModal('edit-board-modal'); };
+
+window.saveEditBoard = async function() {
+  if (!currentBoard || !currentBoardCode) return;
+  const title = document.getElementById('edit-board-title').value.trim();
+  if (!title) { toast('제목을 입력하세요'); return; }
+
+  const updateData = {
+    title,
+    description: document.getElementById('edit-board-desc').value.trim(),
+    deadline: document.getElementById('edit-board-deadline').value || null,
+  };
+
+  if (currentBoard.type !== 'inquiry') {
+    const allowUrl = document.getElementById('edit-allow-url').checked;
+    const allowText = document.getElementById('edit-allow-text').checked;
+    const allowFile = document.getElementById('edit-allow-file').checked;
+    if (!allowUrl && !allowText && !allowFile) { toast('최소 하나의 제출 방식을 선택하세요'); return; }
+    Object.assign(updateData, { allowUrl, allowText, allowFile });
+  }
+
+  try {
+    await updateDoc(doc(db, 'boards', currentBoardCode), updateData);
+    // Update local state
+    Object.assign(currentBoard, updateData);
+
+    // Update displayed title/desc
+    if (currentBoard.type === 'inquiry') {
+      document.getElementById('inquiry-board-title-display').textContent = title;
+      setTextVisibility('inquiry-board-desc-display', updateData.description);
+    } else {
+      document.getElementById('board-title-display').textContent = title;
+      setTextVisibility('board-desc-display', updateData.description);
+    }
+
+    // Update dashboard cache
+    const idx = allBoards.findIndex(b => b.code === currentBoardCode);
+    if (idx !== -1) {
+      allBoards[idx].title = title;
+      allBoards[idx].description = updateData.description;
+      allBoards[idx].deadline = updateData.deadline;
+    }
+
+    closeModal('edit-board-modal');
+    toast('보드가 수정되었습니다');
+  } catch (e) { toast('수정 실패: ' + e.message); }
+};
+
 window.downloadAll = function() {
   const cards = submissionsList.querySelectorAll('.gallery-card');
   let text = `${currentBoard.title} - 제출물 목록\n${'='.repeat(50)}\n\n`;
@@ -1734,7 +1801,7 @@ function showInquiryBoard(code) {
 }
 
 // ── Modal ↔ History (back button closes modals) ──
-const MODAL_IDS = ['detail-modal', 'submit-modal', 'inquiry-submit-modal'];
+const MODAL_IDS = ['detail-modal', 'submit-modal', 'inquiry-submit-modal', 'edit-board-modal'];
 
 function openModalHistory() {
   history.pushState({ modal: true }, '');

@@ -215,6 +215,7 @@
       <div class="board-toolbar">
         <span id="inquiry-submission-count" class="count-badge"></span>
         <div class="toolbar-actions">
+          <button class="btn btn-small" onclick="openEditBoardModal()">✏️ 수정</button>
           <button class="btn btn-small" onclick="showBoardQr()">📱 QR 코드</button>
           <button class="btn btn-small" onclick="copyBoardLink()">🔗 링크 복사</button>
           <button class="btn btn-small btn-danger" onclick="deleteBoard()">🗑 보드 삭제</button>
@@ -308,6 +309,7 @@
       <div class="board-toolbar">
         <span id="submission-count" class="count-badge"></span>
         <div class="toolbar-actions">
+          <button class="btn btn-small" onclick="openEditBoardModal()">✏️ 수정</button>
           <button class="btn btn-small" onclick="showBoardQr()">📱 QR 코드</button>
           <button class="btn btn-small" onclick="copyBoardLink()">🔗 링크 복사</button>
           <button class="btn btn-small" onclick="downloadAll()">📥 전체 다운로드</button>
@@ -316,6 +318,40 @@
       </div>
       <div id="submissions-list" class="gallery-grid">
         <div class="empty-state">아직 제출물이 없습니다</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 보드 수정 모달 -->
+  <div id="edit-board-modal" class="modal" style="display:none">
+    <div class="modal-overlay" onclick="closeEditBoardModal()"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>보드 수정</h2>
+        <button class="modal-close" onclick="closeEditBoardModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>제목 <span class="required">*</span></label>
+          <input type="text" id="edit-board-title">
+        </div>
+        <div class="form-group">
+          <label>설명 (선택)</label>
+          <textarea id="edit-board-desc" rows="3"></textarea>
+        </div>
+        <div class="form-group">
+          <label>마감일 (선택)</label>
+          <input type="datetime-local" id="edit-board-deadline">
+        </div>
+        <div id="edit-assignment-options" class="form-group" style="display:none">
+          <label>제출 방식 허용</label>
+          <div class="checkbox-group">
+            <label class="checkbox-label"><input type="checkbox" id="edit-allow-url"> 🔗 URL</label>
+            <label class="checkbox-label"><input type="checkbox" id="edit-allow-text"> 📝 텍스트</label>
+            <label class="checkbox-label"><input type="checkbox" id="edit-allow-file"> 📎 파일 업로드</label>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="saveEditBoard()">저장</button>
       </div>
     </div>
   </div>
