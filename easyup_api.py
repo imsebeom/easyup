@@ -18,7 +18,7 @@ CLI:
     python easyup_api.py inquiry "질문판 제목" --desc "설명"
 """
 
-import sys, json, string, random, requests
+import sys, json, time, random, requests
 from datetime import datetime, timezone
 
 # ── Constants ──
@@ -38,6 +38,29 @@ INQUIRY_CATEGORIES = ["factual", "conceptual", "debatable", "featured", "resolve
 
 def _generate_code(length=6):
     return "".join(random.choices(CODE_CHARS, k=length))
+
+
+def _generate_sub_id():
+    return f"{int(time.time()*1000)}_{random.randint(100000, 999999)}"
+
+
+def _update_document(doc_path, **fields):
+    url = f"{BASE_URL}/{doc_path}?key={API_KEY}"
+    mask = "&".join(f"updateMask.fieldPaths={k}" for k in fields)
+    url = f"{url}&{mask}"
+    body = {"fields": {k: _to_firestore_value(v) for k, v in fields.items()}}
+    resp = requests.patch(url, json=body)
+    if resp.status_code != 200:
+        raise Exception(f"Firestore 문서 수정 실패 ({resp.status_code}): {resp.text}")
+    return True
+
+
+def _delete_document(doc_path):
+    url = f"{BASE_URL}/{doc_path}?key={API_KEY}"
+    resp = requests.delete(url)
+    if resp.status_code not in (200, 204):
+        raise Exception(f"Firestore 문서 삭제 실패 ({resp.status_code}): {resp.text}")
+    return True
 
 
 def _to_firestore_value(v):
@@ -170,14 +193,117 @@ def create_inquiry_board(title, description="", deadline=None,
     return code, get_join_link(code)
 
 
+def list_boards(owner_uid=OWNER_UID):
+    """소유자의 보드 목록 조회. Returns: list of dict."""
+    url = f"{BASE_URL}:runQuery?key={API_KEY}"
+    body = {
+        "structuredQuery": {
+            "from": [{"collectionId": "boards"}],
+            "where": {
+                "fieldFilter": {
+                    "field": {"fieldPath": "ownerUid"},
+                    "op": "EQUAL",
+                    "value": {"stringValue": owner_uid},
+                }
+            },
+            "orderBy": [{"field": {"fieldPath": "createdAt"}, "direction": "DESCENDING"}],
+        }
+    }
+    resp = requests.post(url, json=body)
+    if resp.status_code != 200:
+        raise Exception(f"보드 목록 조회 실패 ({resp.status_code}): {resp.text}")
+    results = []
+    for item in resp.json():
+        doc = item.get("document")
+        if not doc:
+            continue
+        fields = doc.get("fields", {})
+        board = {k: _from_firestore_value(v) for k, v in fields.items()}
+        results.append(board)
+    return results
+
+
+def list_submissions(board_code):
+    """보드의 제출물/질문 목록 조회. Returns: list of (id, dict)."""
+    results = []
+    page_token = None
+    while True:
+        url = f"{BASE_URL}/boards/{board_code}/submissions?key={API_KEY}&pageSize=500"
+        if page_token:
+            url += f"&pageToken={page_token}"
+        resp = requests.get(url)
+        if resp.status_code != 200:
+            raise Exception(f"제출물 조회 실패 ({resp.status_code}): {resp.text}")
+        data = resp.json()
+        for doc in data.get("documents", []):
+            doc_id = doc["name"].split("/")[-1]
+            fields = doc.get("fields", {})
+            submission = {k: _from_firestore_value(v) for k, v in fields.items()}
+            results.append((doc_id, submission))
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+    return results
+
+
+def update_board(code, **fields):
+    """보드 필드 업데이트. 변경할 필드만 kwargs로 전달."""
+    return _update_document(f"boards/{code}", **fields)
+
+
+def delete_board(code):
+    """보드 삭제 (하위 submissions는 별도 삭제 필요)."""
+    return _delete_document(f"boards/{code}")
+
+
+def add_submission(board_code, name, content, sub_type="text", title="",
+                   device_id="api", memo="", files=None):
+    """
+    과제 수합 보드에 제출물 추가 (텍스트/URL).
+
+    Returns: submission_id
+    """
+    sub_id = _generate_sub_id()
+    fields = {
+        "name": name,
+        "content": content,
+        "type": sub_type,
+        "title": title,
+        "memo": memo,
+        "files": files or [],
+        "deviceId": device_id,
+        "boardCode": board_code,
+        "createdAt": datetime.now(timezone.utc),
+    }
+    _create_document(f"boards/{board_code}/submissions", sub_id, fields)
+    return sub_id
+
+
+def update_submission(board_code, sub_id, **fields):
+    """제출물 필드 업데이트."""
+    return _update_document(f"boards/{board_code}/submissions/{sub_id}", **fields)
+
+
+def delete_submission(board_code, sub_id):
+    """제출물 삭제."""
+    return _delete_document(f"boards/{board_code}/submissions/{sub_id}")
+
+
+def delete_all_submissions(board_code):
+    """보드의 모든 제출물 삭제."""
+    subs = list_submissions(board_code)
+    for sub_id, _ in subs:
+        delete_submission(board_code, sub_id)
+    return len(subs)
+
+
 def add_inquiry_question(board_code, name, content, category="factual", device_id="api"):
     """
     질문판에 질문 추가 (테스트/시드 데이터용).
 
     Returns: submission_id
     """
-    import time
-    sub_id = f"{int(time.time()*1000)}_{random.randint(100000, 999999)}"
+    sub_id = _generate_sub_id()
     fields = {
         "name": name,
         "content": content,

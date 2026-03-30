@@ -109,6 +109,10 @@ CLI: `python easyup_api.py inquiry "제목" --desc "설명"`
 - [x] 전체 뷰 해시 라우팅 (뒤로가기/앞으로가기 지원, handleRoute boolean 반환)
 - [x] 모달 ↔ History 연동 (뒤로가기로 모달 닫기, closeModal() 유틸리티 통합)
 - [x] 교사 보드뷰와 학생 갤러리 카드 레이아웃 통합 (gallery-card 공유)
+- [x] 보드 수정 기능 (제목/설명/마감일/제출방식 변경, 모달 UI, History 연동)
+- [x] API 확장: 보드/제출물 CRUD (list_boards, list_submissions, update/delete, add_submission)
+- [x] API 리팩터링: _update_document/_delete_document/_generate_sub_id 헬퍼 추출, 페이지네이션 추가
+- [x] `/easyup` 스킬 생성 (Claude Code에서 보드 생성·관리)
 - [ ] Firestore rules 강화 (submissions update/delete가 현재 if true)
 - [ ] 마감일 초과 제출 차단 로직
 - [ ] 모바일 반응형 테스트
