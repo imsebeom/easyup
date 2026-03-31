@@ -8,8 +8,13 @@
 </head>
 <body>
   <div id="app">
+    <!-- 초기 로딩 -->
+    <div id="loading-view" class="view active">
+      <div class="empty-state" style="min-height:80vh"><div class="spinner"></div><p>로딩 중...</p></div>
+    </div>
+
     <!-- 교사: 로그인 -->
-    <div id="login-view" class="view active">
+    <div id="login-view" class="view">
       <div class="login-container">
         <h1>📋 EasyUp</h1>
         <p class="subtitle">과제 수합 · 탐구 질문판</p>
@@ -378,6 +383,24 @@
           <button class="btn btn-small" id="confirm-cancel">취소</button>
           <button class="btn btn-danger-fill" id="confirm-ok">삭제</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 학생: 이름 변경 모달 -->
+  <div id="change-name-modal" class="modal" style="display:none">
+    <div class="modal-overlay" onclick="closeModal('change-name-modal')"></div>
+    <div class="modal-content" style="max-width:400px">
+      <div class="modal-header">
+        <h2>이름 변경</h2>
+        <button class="modal-close" onclick="closeModal('change-name-modal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>새 이름</label>
+          <input type="text" id="change-name-input" placeholder="이름을 입력하세요">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="saveChangedName()">변경하기</button>
       </div>
     </div>
   </div>

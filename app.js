@@ -338,13 +338,20 @@ async function checkUserApproval(user) {
   return role;
 }
 
+// Student routes: handle immediately before auth (no flash of login screen)
+(function earlyStudentRoute() {
+  const hash = location.hash.slice(1);
+  if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/')) {
+    handleStudentRoute(hash.split('/')[1].toUpperCase());
+  }
+})();
+
 onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   const hash = location.hash.slice(1);
 
-  // Student route: no auth needed
-  if (hash.startsWith('join/')) {
-    handleStudentRoute(hash.split('/')[1].toUpperCase());
+  // Student route: already handled by earlyStudentRoute or popstate
+  if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/')) {
     return;
   }
 
@@ -549,8 +556,28 @@ window.enterBoard = function() {
 document.getElementById('student-name-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') enterBoard();
 });
+document.getElementById('change-name-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') saveChangedName();
+});
 
-window.changeStudentName = function() { showNameView(); };
+window.changeStudentName = function() {
+  document.getElementById('change-name-input').value = studentName;
+  const modal = document.getElementById('change-name-modal');
+  modal.style.display = 'flex';
+  history.pushState({ modal: true }, '');
+  setTimeout(() => document.getElementById('change-name-input').focus(), 100);
+};
+
+window.saveChangedName = function() {
+  const name = document.getElementById('change-name-input').value.trim();
+  if (!name) { toast('이름을 입력하세요'); return; }
+  studentName = name;
+  localStorage.setItem(`easyup_name_${currentBoardCode}`, name);
+  document.getElementById('gallery-student-name').textContent = name;
+  document.getElementById('inquiry-gallery-student-name').textContent = name;
+  closeModal('change-name-modal');
+  toast('이름이 변경되었습니다');
+};
 
 // ══════════════════════════════════════
 //  STUDENT: GALLERY BOARD
@@ -1886,14 +1913,14 @@ function showInquiryBoard(code) {
 }
 
 // ── Modal ↔ History (back button closes modals) ──
-const MODAL_IDS = ['detail-modal', 'submit-modal', 'inquiry-submit-modal', 'edit-board-modal'];
+const MODAL_IDS = ['detail-modal', 'submit-modal', 'inquiry-submit-modal', 'edit-board-modal', 'change-name-modal'];
 
 function openModalHistory() {
   history.pushState({ modal: true }, '');
 }
 
 /** Close a specific modal (or all). Handles history sync. */
-function closeModal(modalId) {
+window.closeModal = function(modalId) {
   const ids = modalId ? [modalId] : MODAL_IDS;
   let closed = false;
   ids.forEach(id => {
@@ -1904,7 +1931,7 @@ function closeModal(modalId) {
   existingFiles = null;
   teacherEditMode = false;
   if (history.state?.modal) history.back();
-}
+};
 
 function isAnyModalOpen() {
   return MODAL_IDS.some(id => document.getElementById(id).style.display === 'flex');
