@@ -305,7 +305,7 @@ window.googleLogout = async function() {
   showView('login-view');
 };
 
-const ADMIN_EMAIL = 'hccgahy1@gmail.com';
+const ADMIN_EMAIL = firebaseConfig.adminEmail || '';
 
 /** Check/create user doc and return role */
 async function checkUserApproval(user) {

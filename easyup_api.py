@@ -11,7 +11,7 @@ EasyUp API — 보드 생성/조회 유틸리티
     code = create_inquiry_board("3단원 탐구 질문판", description="지층과 화석에 대해 궁금한 점")
 
     # 참여 링크
-    print(get_join_link(code))  # https://easyup-1604e.web.app/#join/ABC123
+    print(get_join_link(code))  # https://YOUR_PROJECT.web.app/#join/ABC123
 
 CLI:
     python easyup_api.py assignment "과제 제목" --desc "설명"
@@ -22,14 +22,13 @@ import os, sys, json, time, random, requests
 from datetime import datetime, timezone
 
 # ── Constants ──
-PROJECT_ID = "easyup-1604e"
+PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "")
 API_KEY = os.environ.get("FIREBASE_API_KEY", "")
 BASE_URL = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
-HOSTING_URL = "https://easyup-1604e.web.app"
+HOSTING_URL = os.environ.get("FIREBASE_HOSTING_URL", f"https://{PROJECT_ID}.web.app")
 
-# Owner UID for API-created boards (임세범 선생님 계정)
-OWNER_UID = "bCE3XELLx0W85uUEz4TUz7Iqb2k2"
-OWNER_NAME = "임세범"
+OWNER_UID = os.environ.get("EASYUP_OWNER_UID", "")
+OWNER_NAME = os.environ.get("EASYUP_OWNER_NAME", "")
 
 CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 

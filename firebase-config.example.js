@@ -7,5 +7,6 @@ export const firebaseConfig = {
   storageBucket: "YOUR_PROJECT.firebasestorage.app",
   messagingSenderId: "YOUR_SENDER_ID",
   appId: "YOUR_APP_ID",
-  measurementId: "YOUR_MEASUREMENT_ID"
+  measurementId: "YOUR_MEASUREMENT_ID",
+  adminEmail: "your-admin@gmail.com"
 };
