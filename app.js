@@ -736,11 +736,17 @@ function setupTabs() {
   if (currentBoard.allowFile) types.push('file');
 
   types.forEach((t, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'tab-btn' + (i === 0 ? ' active' : '');
-    btn.textContent = TYPE_CONFIG[t].label;
-    btn.onclick = () => selectTab(t);
-    tabs.appendChild(btn);
+    const label = document.createElement('label');
+    label.className = 'radio-option';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'submit-type';
+    radio.value = t;
+    if (i === 0) radio.checked = true;
+    radio.addEventListener('change', () => selectTab(t));
+    label.appendChild(radio);
+    label.appendChild(document.createTextNode(' ' + TYPE_CONFIG[t].label));
+    tabs.appendChild(label);
   });
 
   if (types.length > 0) selectTab(types[0]);
@@ -749,8 +755,8 @@ function setupTabs() {
 window.closeSubmitModal = function() { closeModal('submit-modal'); };
 
 function selectTab(type) {
-  document.querySelectorAll('.tab-btn').forEach(b => {
-    b.classList.toggle('active', b.textContent === TYPE_CONFIG[type].label);
+  document.querySelectorAll('input[name="submit-type"]').forEach(r => {
+    r.checked = r.value === type;
   });
   document.querySelectorAll('.submit-section').forEach(s => s.style.display = 'none');
   document.getElementById(`submit-${type}-section`).style.display = 'block';
