@@ -3,15 +3,7 @@ import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc, upda
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-storage.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
 
-const firebaseConfig = {
-  apiKey: "REDACTED_API_KEY",
-  authDomain: "easyup-1604e.firebaseapp.com",
-  projectId: "easyup-1604e",
-  storageBucket: "easyup-1604e.firebasestorage.app",
-  messagingSenderId: "512845556710",
-  appId: "1:512845556710:web:1b99a924dac0f1e6d10427",
-  measurementId: "G-B660Z633QD"
-};
+import { firebaseConfig } from "./firebase-config.js";
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);

@@ -14,13 +14,21 @@ Padlet 대안으로, 교사가 보드를 만들고 학생들이 과제를 제출
 - **프론트엔드**: Vanilla HTML/CSS/JS (빌드 도구 없음)
 - **백엔드**: Firebase (Firestore + Storage + Hosting + Auth)
 
+## 설정
+
+1. `firebase-config.example.js`를 `firebase-config.js`로 복사
+2. 본인의 Firebase 프로젝트 설정으로 교체
+3. `.env`에 `FIREBASE_API_KEY=YOUR_KEY` 추가 (Python API용)
+
+```bash
+cp firebase-config.example.js firebase-config.js
+```
+
 ## 배포
 
 ```bash
-firebase deploy --project easyup-1604e --only hosting
+firebase deploy --only hosting
 ```
-
-**URL**: https://easyup-1604e.web.app/
 
 ## API 유틸리티
 

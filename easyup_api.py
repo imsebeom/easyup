@@ -18,12 +18,12 @@ CLI:
     python easyup_api.py inquiry "질문판 제목" --desc "설명"
 """
 
-import sys, json, time, random, requests
+import os, sys, json, time, random, requests
 from datetime import datetime, timezone
 
 # ── Constants ──
 PROJECT_ID = "easyup-1604e"
-API_KEY = "REDACTED_API_KEY"
+API_KEY = os.environ.get("FIREBASE_API_KEY", "")
 BASE_URL = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
 HOSTING_URL = "https://easyup-1604e.web.app"
 
