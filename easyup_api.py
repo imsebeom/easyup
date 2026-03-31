@@ -245,6 +245,53 @@ def list_submissions(board_code):
     return results
 
 
+def list_users(role=None):
+    """사용자 목록 조회. role 지정 시 해당 역할만 필터. Returns: list of (uid, dict)."""
+    results = []
+    page_token = None
+    while True:
+        url = f"{BASE_URL}/users?key={API_KEY}&pageSize=500"
+        if page_token:
+            url += f"&pageToken={page_token}"
+        resp = requests.get(url)
+        if resp.status_code != 200:
+            raise Exception(f"사용자 조회 실패 ({resp.status_code}): {resp.text}")
+        data = resp.json()
+        for doc in data.get("documents", []):
+            uid = doc["name"].split("/")[-1]
+            fields_data = doc.get("fields", {})
+            user = {k: _from_firestore_value(v) for k, v in fields_data.items()}
+            if role is None or user.get("role") == role:
+                results.append((uid, user))
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+    return results
+
+
+def list_all_boards():
+    """전체 보드 목록 조회 (소유자 무관). Returns: list of dict."""
+    url = f"{BASE_URL}:runQuery?key={API_KEY}"
+    body = {
+        "structuredQuery": {
+            "from": [{"collectionId": "boards"}],
+            "orderBy": [{"field": {"fieldPath": "createdAt"}, "direction": "DESCENDING"}],
+        }
+    }
+    resp = requests.post(url, json=body)
+    if resp.status_code != 200:
+        raise Exception(f"전체 보드 조회 실패 ({resp.status_code}): {resp.text}")
+    results = []
+    for item in resp.json():
+        doc = item.get("document")
+        if not doc:
+            continue
+        fields_data = doc.get("fields", {})
+        board = {k: _from_firestore_value(v) for k, v in fields_data.items()}
+        results.append(board)
+    return results
+
+
 def update_board(code, **fields):
     """보드 필드 업데이트. 변경할 필드만 kwargs로 전달."""
     return _update_document(f"boards/{code}", **fields)

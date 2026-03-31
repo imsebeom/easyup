@@ -4,3 +4,5 @@ node_modules/
 *.log
 __pycache__/
 firebase-config.js
+latest_report.html
+usage_report.log

@@ -123,6 +123,18 @@ CLI: `python easyup_api.py inquiry "제목" --desc "설명"`
 - [x] 학생 이름변경 모달 (뷰 전환 → 모달, 해시 라우터 충돌 해결)
 - [x] 초기 로딩 화면 (loading-view 스피너, 학생 라우트 즉시 처리로 로그인 깜빡임 제거)
 - [x] closeModal window 노출 (ES Module 스코프 수정)
+- [x] GitHub 공개 레포 (imsebeom/easyup)
+  - API 키/개인정보를 firebase-config.js + .env로 분리 (.gitignore)
+  - git-filter-repo로 히스토리에서 키 완전 제거
+  - firebase-config.example.js 템플릿 제공
+- [x] 제출 유형 UI 변경 (탭 버튼 → 라디오 버튼)
+- [x] 주간 교사별 사용량/비용 보고서 (Cloud Functions)
+  - `functions/index.js`: weeklyUsageReport (매주 월 09:00 KST) + testUsageReport (HTTP)
+  - Firestore 데이터에서 교사별 보드/제출물/파일용량 집계, 비용 추정
+  - Gmail SMTP로 HTML 보고서 이메일 발송
+  - Secrets: GMAIL_APP_PASSWORD, REPORT_EMAIL, GMAIL_SENDER (Firebase Secret Manager)
+  - 테스트 URL: https://us-central1-easyup-1604e.cloudfunctions.net/testUsageReport
+- [x] easyup_api.py 확장: list_users(), list_all_boards() 추가
 - [ ] Firestore rules 강화 (submissions update/delete가 현재 if true)
 - [ ] 마감일 초과 제출 차단 로직
 - [ ] 모바일 반응형 테스트
