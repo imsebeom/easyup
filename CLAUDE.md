@@ -121,6 +121,9 @@ CLI: `python easyup_api.py inquiry "제목" --desc "설명"`
   - 보드 카드 10개 버튼: 교사공유/학생공유/QR/미리보기/편집/결과/마감/복제/숨기기/삭제
   - 새 보드 필드: `status` (active/closed), `hidden` (boolean)
   - `updateBoardField()` 공통 헬퍼, `getTeacherLink()` 유틸리티
+- [x] 학생 이름변경 모달 (뷰 전환 → 모달, 해시 라우터 충돌 해결)
+- [x] 초기 로딩 화면 (loading-view 스피너, 학생 라우트 즉시 처리로 로그인 깜빡임 제거)
+- [x] closeModal window 노출 (ES Module 스코프 수정)
 - [ ] Firestore rules 강화 (submissions update/delete가 현재 if true)
 - [ ] 마감일 초과 제출 차단 로직
 - [ ] 모바일 반응형 테스트
