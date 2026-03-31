@@ -268,6 +268,7 @@ let unsubscribeGallery = null;
 let allBoards = [];
 let currentSort = 'createdAt';
 let currentSortDir = 'desc';
+let showingHidden = false;
 let editingSubmissionId = null;
 let existingFiles = null;
 let studentName = '';
@@ -912,7 +913,7 @@ async function removeSubmission(id, { checkOwnership = false } = {}) {
 async function loadMyBoards() {
   if (!currentUser) return;
   const container = document.getElementById('dashboard-boards');
-  container.innerHTML = '<div class="empty-state">로딩 중...</div>';
+  container.innerHTML = '<div class="empty-state"><div class="spinner"></div><p>불러오는 중...</p></div>';
   try {
     const q = query(collection(db, 'boards'), where('ownerUid', '==', currentUser.uid));
     const snapshot = await getDocs(q);
@@ -928,9 +929,16 @@ async function loadMyBoards() {
 
 function renderDashboard() {
   const container = document.getElementById('dashboard-boards');
+  // Toggle hidden button visibility
+  const hiddenCount = allBoards.filter(b => b.hidden).length;
+  const toggleBtn = document.getElementById('toggle-hidden-btn');
+  if (toggleBtn) {
+    toggleBtn.style.display = hiddenCount > 0 || showingHidden ? '' : 'none';
+    toggleBtn.textContent = showingHidden ? `전체 보기` : `숨긴 보드 (${hiddenCount})`;
+  }
   const search = (document.getElementById('search-boards')?.value || '').trim().toLowerCase();
-  let filtered = allBoards;
-  if (search) filtered = allBoards.filter(b => b.title.toLowerCase().includes(search) || b.code.toLowerCase().includes(search));
+  let filtered = showingHidden ? allBoards.filter(b => b.hidden) : allBoards.filter(b => !b.hidden);
+  if (search) filtered = filtered.filter(b => b.title.toLowerCase().includes(search) || b.code.toLowerCase().includes(search));
 
   filtered.sort((a, b) => {
     if (currentSort === 'title') return currentSortDir === 'asc' ? a.title.localeCompare(b.title, 'ko') : b.title.localeCompare(a.title, 'ko');
@@ -940,65 +948,142 @@ function renderDashboard() {
 
   if (!filtered.length) {
     container.innerHTML = search
-      ? '<div class="empty-state">검색 결과가 없습니다</div>'
-      : '<div class="empty-state">아직 만든 과제 보드가 없습니다.<br>"새 과제 보드" 버튼을 눌러 시작하세요.</div>';
+      ? '<div class="empty-state"><p>검색 결과가 없습니다</p></div>'
+      : '<div class="empty-state"><div class="empty-state-icon">📋</div><p>아직 만든 보드가 없습니다.<br>위의 "새 보드" 버튼을 눌러 시작하세요.</p></div>';
     return;
   }
 
-  container.innerHTML = `<table class="board-table"><thead><tr>
-    <th>과제 제목</th><th class="col-code">코드</th><th class="col-count">제출</th>
-    <th class="col-deadline">마감일</th><th class="col-date">생성일</th><th class="col-actions">관리</th>
-  </tr></thead><tbody>${filtered.map(b => {
-    const created = b.createdAtMs ? new Date(b.createdAtMs).toLocaleDateString('ko-KR') : '-';
-    let dlText = '-', dlClass = '';
-    if (b.deadline) {
-      const dl = new Date(b.deadline);
-      dlText = dl.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
-      if (new Date() > dl) dlClass = 'expired-text';
-    }
-    const typeBadge = b.type === 'inquiry' ? '<span class="board-type-badge inquiry-badge">🔬</span>' : '<span class="board-type-badge assignment-badge">📋</span>';
-    return `<tr class="board-row" data-code="${escapeHtml(b.code)}">
-      <td class="board-title-cell">${typeBadge}<strong>${escapeHtml(b.title)}</strong>
-        ${b.description ? `<span class="board-desc-preview">${escapeHtml(truncate(b.description, 40))}</span>` : ''}</td>
-      <td class="col-code"><span class="code-chip">${escapeHtml(b.code)}</span></td>
-      <td class="col-count"><span class="count-chip">${b.submissionCount}</span></td>
-      <td class="col-deadline ${dlClass}">${dlText}</td>
-      <td class="col-date">${created}</td>
-      <td class="col-actions">
-        <button class="btn-icon btn-qr" data-code="${escapeHtml(b.code)}" data-title="${escapeHtml(b.title)}" title="QR 코드">📱</button>
-        <button class="btn-icon btn-copy-link" data-code="${escapeHtml(b.code)}" title="링크 복사">🔗</button>
-        <button class="btn-icon btn-icon-danger btn-del-board" data-code="${escapeHtml(b.code)}" data-title="${escapeHtml(b.title)}" title="삭제">🗑</button>
-      </td></tr>`;
-  }).join('')}</tbody></table>`;
+  container.innerHTML = filtered.map(b => {
+    const isClosed = b.status === 'closed';
+    const isExpired = !isClosed && b.deadline && new Date() > new Date(b.deadline);
+    const typeBadge = b.type === 'inquiry' ? '🔬 질문판' : '📋 과제';
+    let statusBadge;
+    if (isClosed) statusBadge = '<span class="badge badge-expired">마감</span>';
+    else if (isExpired) statusBadge = '<span class="badge badge-expired">기한초과</span>';
+    else statusBadge = '<span class="badge badge-active">진행중</span>';
+
+    return `<div class="board-card" data-code="${escapeHtml(b.code)}">
+      <div class="board-card-header">
+        <h3>${escapeHtml(b.title)}</h3>
+        ${statusBadge}
+      </div>
+      <div class="board-card-meta">
+        <span>${typeBadge}</span>
+        <span>제출 ${b.submissionCount}건</span>
+        ${b.code ? `<span class="access-code-display">${escapeHtml(b.code)}</span>` : ''}
+      </div>
+      <div class="board-card-actions">
+        <button class="btn btn-sm btn-secondary btn-equal btn-teacher-share" data-code="${escapeHtml(b.code)}">교사공유</button>
+        <button class="btn btn-sm btn-secondary btn-equal btn-copy-link" data-code="${escapeHtml(b.code)}">학생공유</button>
+        <button class="btn btn-sm btn-secondary btn-equal btn-qr" data-code="${escapeHtml(b.code)}" data-title="${escapeHtml(b.title)}">학생QR</button>
+        <a href="${getJoinLink(b.code)}" target="_blank" class="btn btn-sm btn-secondary btn-equal">미리보기</a>
+        <button class="btn btn-sm btn-secondary btn-equal btn-edit-board" data-code="${escapeHtml(b.code)}">편집</button>
+        <button class="btn btn-sm btn-secondary btn-equal btn-open-board" data-code="${escapeHtml(b.code)}">결과</button>
+        <button class="btn btn-sm btn-danger-light btn-equal btn-toggle-status" data-code="${escapeHtml(b.code)}">${isClosed ? '시작' : '마감'}</button>
+        <button class="btn btn-sm btn-secondary btn-equal btn-duplicate" data-code="${escapeHtml(b.code)}">복제</button>
+        <button class="btn btn-sm btn-secondary btn-equal btn-toggle-hidden" data-code="${escapeHtml(b.code)}">${b.hidden ? '꺼내기' : '숨기기'}</button>
+        <button class="btn btn-sm btn-danger-light btn-equal btn-del-board" data-code="${escapeHtml(b.code)}" data-title="${escapeHtml(b.title)}">삭제</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
-// Event delegation for dashboard table (XSS-safe)
+// Event delegation for dashboard cards (XSS-safe)
 document.getElementById('dashboard-boards').addEventListener('click', (e) => {
-  const qrBtn = e.target.closest('.btn-qr');
-  if (qrBtn) { e.stopPropagation(); showQrModal(qrBtn.dataset.code, qrBtn.dataset.title); return; }
-
-  const copyBtn = e.target.closest('.btn-copy-link');
-  if (copyBtn) { e.stopPropagation(); copyJoinLink(copyBtn.dataset.code); return; }
-
-  const delBtn = e.target.closest('.btn-del-board');
-  if (delBtn) { e.stopPropagation(); deleteBoardFromList(delBtn.dataset.code, delBtn.dataset.title); return; }
-
-  const row = e.target.closest('.board-row');
-  if (row?.dataset.code) openBoard(row.dataset.code);
+  const btn = e.target.closest('button');
+  if (btn) {
+    e.stopPropagation();
+    const code = btn.dataset.code;
+    if (btn.classList.contains('btn-teacher-share')) { copyTeacherLink(code); return; }
+    if (btn.classList.contains('btn-copy-link')) { copyJoinLink(code); return; }
+    if (btn.classList.contains('btn-qr')) { showQrModal(code, btn.dataset.title); return; }
+    if (btn.classList.contains('btn-edit-board')) { editBoardFromList(code); return; }
+    if (btn.classList.contains('btn-open-board')) { openBoard(code); return; }
+    if (btn.classList.contains('btn-toggle-status')) { toggleBoardStatus(code); return; }
+    if (btn.classList.contains('btn-duplicate')) { duplicateBoard(code); return; }
+    if (btn.classList.contains('btn-toggle-hidden')) { toggleBoardHidden(code); return; }
+    if (btn.classList.contains('btn-del-board')) { deleteBoardFromList(code, btn.dataset.title); return; }
+  }
+  const card = e.target.closest('.board-card');
+  if (card?.dataset.code && !e.target.closest('.board-card-actions')) openBoard(card.dataset.code);
 });
 
 window.filterBoards = () => renderDashboard();
 window.sortBoards = function(field) {
-  if (currentSort === field) currentSortDir = currentSortDir === 'desc' ? 'asc' : 'desc';
-  else { currentSort = field; currentSortDir = field === 'title' ? 'asc' : 'desc'; }
-  document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
-  document.querySelector(`.sort-btn[data-sort="${field}"]`).classList.add('active');
+  currentSort = field;
+  currentSortDir = field === 'title' ? 'asc' : 'desc';
+  renderDashboard();
+};
+window.toggleShowHidden = function() {
+  showingHidden = !showingHidden;
   renderDashboard();
 };
 
 function copyJoinLink(code) {
   navigator.clipboard.writeText(getJoinLink(code));
   toast('학생 참여 링크 복사됨');
+}
+
+function getTeacherLink(code) {
+  return `${location.origin}${location.pathname}#board/${code}`;
+}
+
+function copyTeacherLink(code) {
+  navigator.clipboard.writeText(getTeacherLink(code));
+  toast('교사용 링크 복사됨');
+}
+
+async function editBoardFromList(code) {
+  await openBoard(code);
+  window.openEditBoardModal();
+}
+
+async function updateBoardField(code, field, newVal, successMsg, errMsg = '변경 실패') {
+  const board = allBoards.find(b => b.code === code);
+  if (!board) return;
+  try {
+    await updateDoc(doc(db, 'boards', code), { [field]: newVal });
+    board[field] = newVal;
+    renderDashboard();
+    toast(successMsg);
+  } catch (e) { toast(errMsg); }
+}
+
+function toggleBoardStatus(code) {
+  const board = allBoards.find(b => b.code === code);
+  if (!board) return;
+  const newStatus = board.status === 'closed' ? 'active' : 'closed';
+  updateBoardField(code, 'status', newStatus, newStatus === 'closed' ? '마감됨' : '다시 시작됨', '상태 변경 실패');
+}
+
+function toggleBoardHidden(code) {
+  const board = allBoards.find(b => b.code === code);
+  if (!board) return;
+  const newHidden = !board.hidden;
+  updateBoardField(code, 'hidden', newHidden, newHidden ? '숨김 처리됨' : '다시 표시됨');
+}
+
+async function duplicateBoard(code) {
+  const board = allBoards.find(b => b.code === code);
+  if (!board) return;
+  const newCode = generateCode();
+  const boardData = {
+    title: board.title + ' (복제)', description: board.description || '', deadline: board.deadline || null,
+    type: board.type, code: newCode, ownerUid: currentUser.uid,
+    ownerName: currentUser.displayName || currentUser.email,
+    createdAt: serverTimestamp()
+  };
+  if (board.type === 'assignment') {
+    Object.assign(boardData, { allowUrl: board.allowUrl ?? true, allowText: board.allowText ?? true, allowFile: board.allowFile ?? true });
+  } else {
+    boardData.categories = board.categories || Object.keys(INQUIRY_CATEGORIES);
+  }
+  try {
+    await setDoc(doc(db, 'boards', newCode), boardData);
+    allBoards.push({ ...boardData, code: newCode, submissionCount: 0, createdAtMs: Date.now() });
+    renderDashboard();
+    toast('복제 완료');
+  } catch (e) { toast('복제 실패'); }
 }
 
 /** Delete board and all its submissions + files */

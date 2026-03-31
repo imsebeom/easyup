@@ -37,27 +37,39 @@
     <!-- 교사: 대시보드 -->
     <div id="dashboard-view" class="view">
       <header class="dashboard-header">
-        <div class="header-left"><h1>📋 EasyUp</h1></div>
-        <div class="header-right">
-          <span id="user-name" class="user-name"></span>
-          <button class="btn btn-small" id="btn-manage-users" onclick="location.hash='users'" style="display:none">👥 회원관리</button>
-          <button class="btn btn-small" onclick="googleLogout()">로그아웃</button>
+        <div class="dashboard-header-inner">
+          <div class="header-left"><h1>📋 EasyUp</h1></div>
+          <div class="header-right">
+            <span id="user-name" class="user-name"></span>
+            <button class="btn btn-sm btn-secondary" id="btn-manage-users" onclick="location.hash='users'" style="display:none">👥 회원관리</button>
+            <button class="btn btn-sm btn-secondary" onclick="googleLogout()">로그아웃</button>
+          </div>
         </div>
       </header>
-      <div class="dashboard-toolbar">
-        <button class="btn btn-primary" onclick="showView('create-view')">+ 새 보드</button>
-        <div class="search-box">
-          <input type="text" id="search-boards" placeholder="보드 검색..." oninput="filterBoards()">
+      <div class="dashboard-content">
+        <div class="dashboard-list-header">
+          <h2>내 보드</h2>
+          <button class="btn btn-primary btn-sm" onclick="showView('create-view')">+ 새 보드</button>
         </div>
-      </div>
-      <div class="sort-bar">
-        <span class="sort-label">정렬:</span>
-        <button class="sort-btn active" data-sort="createdAt" onclick="sortBoards('createdAt')">최신순</button>
-        <button class="sort-btn" data-sort="title" onclick="sortBoards('title')">제목순</button>
-        <button class="sort-btn" data-sort="submissions" onclick="sortBoards('submissions')">제출수</button>
-      </div>
-      <div id="dashboard-boards" class="dashboard-boards">
-        <div class="empty-state">로딩 중...</div>
+        <div class="sort-toolbar">
+          <div class="sort-options">
+            <label class="sort-label">정렬</label>
+            <select id="sort-select" class="sort-select" onchange="sortBoards(this.value)">
+              <option value="createdAt">최신순</option>
+              <option value="title">제목순</option>
+              <option value="submissions">제출 많은순</option>
+            </select>
+          </div>
+          <div class="sort-toolbar-right">
+            <button class="btn btn-sm btn-secondary" id="toggle-hidden-btn" onclick="toggleShowHidden()" style="display:none"></button>
+            <div class="search-box">
+              <input type="text" id="search-boards" placeholder="검색..." oninput="filterBoards()">
+            </div>
+          </div>
+        </div>
+        <div id="dashboard-boards" class="board-cards">
+          <div class="empty-state"><div class="spinner"></div><p>불러오는 중...</p></div>
+        </div>
       </div>
     </div>
 
