@@ -260,13 +260,16 @@ function renderFileLinksHtml(files) {
 /** Render file thumbnail for gallery cards */
 function renderFileThumbnailHtml(files) {
   if (!files?.length) return '';
-  const firstImage = files.find(f => getMediaType(f.name) === 'image');
-  const firstVideo = files.find(f => getMediaType(f.name) === 'video');
+  let firstMedia = null, mediaType = null;
+  for (const f of files) {
+    const t = getMediaType(f.name);
+    if (t) { firstMedia = f; mediaType = t; break; }
+  }
   let thumb = '';
-  if (firstImage) {
-    thumb = `<div class="card-thumbnail"><img src="${escapeHtml(firstImage.url)}" alt="" loading="lazy"></div>`;
-  } else if (firstVideo) {
-    thumb = `<div class="card-thumbnail"><video src="${escapeHtml(firstVideo.url)}" preload="metadata" muted></video><div class="card-thumbnail-badge">▶ 영상</div></div>`;
+  if (firstMedia && mediaType === 'image') {
+    thumb = `<div class="card-thumbnail"><img src="${escapeHtml(firstMedia.url)}" alt="" loading="lazy"></div>`;
+  } else if (firstMedia && mediaType === 'video') {
+    thumb = `<div class="card-thumbnail"><video src="${escapeHtml(firstMedia.url)}" preload="metadata" muted></video><div class="card-thumbnail-badge">▶ 영상</div></div>`;
   }
   const otherCount = files.length - (thumb ? 1 : 0);
   if (thumb) {
@@ -778,15 +781,13 @@ async function openDetail(submissionId) {
 function navigateDetail(direction) {
   const newIndex = currentDetailIndex + direction;
   if (newIndex < 0 || newIndex >= galleryDocs.length) return;
-  if (unsubscribeComments) { unsubscribeComments(); unsubscribeComments = null; }
+  cleanupComments();
   openDetail(galleryDocs[newIndex].id);
 }
 
-// Navigation buttons
 document.getElementById('detail-prev').addEventListener('click', () => navigateDetail(-1));
 document.getElementById('detail-next').addEventListener('click', () => navigateDetail(1));
 
-// Keyboard navigation (ArrowLeft/Right)
 document.addEventListener('keydown', (e) => {
   if (document.getElementById('detail-modal').style.display !== 'flex') return;
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
@@ -794,7 +795,6 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowRight') navigateDetail(1);
 });
 
-// Touch swipe navigation on detail modal
 {
   let swipeStartX = 0, swipeStartY = 0;
   const detailContent = document.querySelector('#detail-modal .modal-content');
@@ -811,23 +811,27 @@ document.addEventListener('keydown', (e) => {
   }, { passive: true });
 }
 
-window.closeDetailModal = function() {
+function cleanupComments() {
   if (unsubscribeComments) { unsubscribeComments(); unsubscribeComments = null; }
+}
+
+window.closeDetailModal = function() {
+  cleanupComments();
   closeModal('detail-modal');
 };
 
 // ── Comments ──
 async function loadCommentCounts(submissionIds) {
   const code = currentBoardCode;
-  for (const id of submissionIds) {
+  await Promise.all(submissionIds.map(async (id) => {
     const el = document.querySelector(`.card-comment-count[data-sub-id="${id}"]`);
-    if (!el) continue;
+    if (!el) return;
     try {
-      const snap = await getDocs(collection(db, 'boards', code, 'submissions', id, 'comments'));
-      const count = snap.docs.filter(d => !d.data().deleted).length;
+      const snap = await getCountFromServer(collection(db, 'boards', code, 'submissions', id, 'comments'));
+      const count = snap.data().count;
       el.innerHTML = count > 0 ? `<span class="card-comment-badge">💬 ${count}</span>` : '';
     } catch (_) {}
-  }
+  }));
 }
 
 function isCurrentBoardTeacher() {
@@ -835,7 +839,7 @@ function isCurrentBoardTeacher() {
 }
 
 function setupCommentsListener(submissionId) {
-  if (unsubscribeComments) { unsubscribeComments(); unsubscribeComments = null; }
+  cleanupComments();
   const commentsRef = collection(db, 'boards', currentBoardCode, 'submissions', submissionId, 'comments');
   const q = query(commentsRef, orderBy('createdAt', 'asc'));
   unsubscribeComments = onSnapshot(q, (snapshot) => {
@@ -942,7 +946,7 @@ async function saveCommentEdit(submissionId, commentId, newContent) {
     if (!snap.exists()) return;
     const old = snap.data();
     const editor = isCurrentBoardTeacher() ? '교사' : old.name;
-    const editHistory = old.editHistory || [];
+    const editHistory = (old.editHistory || []).slice(-19);
     editHistory.push({ content: old.content, editedAt: old.editedAt || old.createdAt, editedBy: editor });
     await updateDoc(ref, {
       content: newContent,
@@ -2286,7 +2290,7 @@ window.addEventListener('popstate', () => {
     MODAL_IDS.forEach(id => { document.getElementById(id).style.display = 'none'; });
     existingFiles = null;
     teacherEditMode = false;
-    if (unsubscribeComments) { unsubscribeComments(); unsubscribeComments = null; }
+    cleanupComments();
     return;
   }
   handleRoute();
