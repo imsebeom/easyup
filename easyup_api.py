@@ -162,6 +162,8 @@ def create_board(title, description="", deadline=None,
         "code": code,
         "ownerUid": owner_uid,
         "ownerName": owner_name,
+        "status": "active",
+        "hidden": False,
         "createdAt": datetime.now(timezone.utc),
     }
     _create_document("boards", code, fields)
@@ -186,6 +188,8 @@ def create_inquiry_board(title, description="", deadline=None,
         "code": code,
         "ownerUid": owner_uid,
         "ownerName": owner_name,
+        "status": "active",
+        "hidden": False,
         "createdAt": datetime.now(timezone.utc),
     }
     _create_document("boards", code, fields)

@@ -1440,6 +1440,7 @@ async function duplicateBoard(code) {
     title: board.title + ' (복제)', description: board.description || '', deadline: board.deadline || null,
     type: board.type, code: newCode, ownerUid: currentUser.uid,
     ownerName: currentUser.displayName || currentUser.email,
+    status: 'active', hidden: false,
     createdAt: serverTimestamp()
   };
   if (board.type === 'assignment') {
@@ -1507,6 +1508,7 @@ window.createBoard = async function() {
     title, description: desc, deadline: deadline || null,
     type: selectedBoardType,
     code, ownerUid: currentUser.uid, ownerName: currentUser.displayName || currentUser.email,
+    status: 'active', hidden: false,
     createdAt: serverTimestamp()
   };
 
