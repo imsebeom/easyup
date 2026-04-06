@@ -157,6 +157,58 @@ body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',
 .detail-files { display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
 .detail-memo { color:var(--text-light); font-style:italic; }
 
+/* Media embeds (detail modal) */
+.file-media { margin-bottom:12px; }
+.file-embed-img { max-width:100%; height:auto; border-radius:8px; display:block; cursor:pointer; }
+.file-embed-video { max-width:100%; border-radius:8px; display:block; }
+.file-media-name { font-size:.8rem; color:var(--text-light); margin-top:4px; }
+
+/* Card thumbnail (gallery) */
+.card-thumbnail { margin:-16px -16px 8px; border-radius:var(--radius) var(--radius) 0 0; overflow:hidden; max-height:144px; position:relative; }
+.card-thumbnail img, .card-thumbnail video { width:100%; height:144px; object-fit:cover; display:block; }
+.card-thumbnail-badge { position:absolute; bottom:6px; left:6px; background:rgba(0,0,0,.6); color:#fff; font-size:.7rem; padding:2px 8px; border-radius:10px; }
+
+/* Detail modal navigation */
+.detail-modal-header { display:flex; align-items:center; gap:8px; }
+.detail-modal-header h2 { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.detail-header-right { display:flex; align-items:center; gap:4px; flex-shrink:0; }
+.detail-nav { background:none; border:1px solid var(--border); border-radius:50%; width:36px; height:36px; font-size:1.4rem; cursor:pointer; color:var(--text); display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all .15s; }
+.detail-nav:hover { background:var(--bg); border-color:var(--primary); color:var(--primary); }
+.detail-modal-content { max-width:640px; }
+
+/* Comments */
+.detail-comments { margin-top:20px; border-top:1px solid var(--border); padding-top:16px; }
+.comments-title { font-size:1rem; font-weight:700; margin-bottom:12px; }
+.comments-title span { font-weight:400; color:var(--text-light); font-size:.85rem; }
+#comments-list { display:flex; flex-direction:column; gap:8px; margin-bottom:12px; max-height:300px; overflow-y:auto; }
+.comment-item { padding:10px 12px; background:var(--bg); border-radius:8px; }
+.comment-item-mine { border-left:3px solid var(--primary); }
+.comment-meta { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+.comment-author { font-size:.8rem; font-weight:700; }
+.comment-time { font-size:.75rem; color:var(--text-light); }
+.comment-content { font-size:.9rem; line-height:1.6; white-space:pre-wrap; }
+.comment-input-area { display:flex; gap:8px; align-items:flex-end; }
+.comment-input-area textarea { flex:1; resize:none; padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:.9rem; font-family:inherit; }
+.comment-input-area textarea:focus { outline:none; border-color:var(--primary); }
+.comment-input-area .btn { white-space:nowrap; }
+.comments-empty { font-size:.85rem; color:var(--text-light); text-align:center; padding:8px; }
+.comment-action-btn { background:none; border:none; cursor:pointer; font-size:.7rem; padding:2px 4px; opacity:.5; transition:opacity .15s; }
+.comment-action-btn:hover { opacity:1; }
+.comment-item:hover .comment-action-btn { opacity:.8; }
+.comment-edited { font-size:.75rem; color:var(--text-light); font-weight:400; }
+.comment-item-deleted { opacity:.5; border-left:3px solid var(--danger); }
+.comment-deleted-text { font-size:.8rem; color:var(--danger); font-style:italic; }
+.comment-original { font-size:.8rem; color:var(--text-light); margin-top:4px; padding:4px 8px; background:var(--bg); border-radius:4px; }
+.comment-history { margin-top:6px; }
+.comment-history summary { font-size:.75rem; color:var(--text-light); cursor:pointer; }
+.comment-history-item { font-size:.75rem; color:var(--text-light); padding:2px 0; border-bottom:1px solid var(--border); }
+.comment-history-time { font-weight:600; margin-right:4px; }
+#comment-edit-cancel { margin-left:4px; }
+
+/* Card comment count badge */
+.card-comment-count { min-height:0; }
+.card-comment-badge { font-size:.8rem; color:var(--text-light); }
+
 /* ── Dashboard ── */
 .dashboard-header {
   background:white; border-bottom:1px solid var(--gray-200);
@@ -383,4 +435,8 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
   .shelf-container { overflow-x:auto; }
   .shelf-column { min-width:200px; flex-shrink:0; }
   .category-select { flex-direction:column; }
+  .detail-nav { width:32px; height:32px; font-size:1.2rem; }
+  .comment-input-area { flex-direction:column; }
+  .comment-input-area .btn { align-self:flex-end; }
+  .card-thumbnail img, .card-thumbnail video { height:112px; }
 }

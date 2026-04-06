@@ -203,6 +203,14 @@ function setTextVisibility(elementId, text) {
   el.style.display = text ? 'block' : 'none';
 }
 
+/** Check if the current board is closed (by status or deadline) */
+function isBoardClosed() {
+  if (!currentBoard) return false;
+  if (currentBoard.status === 'closed') return true;
+  if (currentBoard.deadline && new Date() > new Date(currentBoard.deadline)) return true;
+  return false;
+}
+
 /** Render deadline notice into an element */
 function renderDeadline(elementId, deadline) {
   const el = document.getElementById(elementId);
@@ -222,11 +230,51 @@ async function deleteStorageFiles(files) {
   await Promise.all(files.map(f => deleteObject(ref(storage, f.path)).catch(() => {})));
 }
 
-/** Render file links HTML */
+/** Media type detection by file extension */
+const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+const VIDEO_EXTS = ['mp4', 'webm', 'mov', 'ogg'];
+function getMediaType(filename) {
+  const ext = (filename || '').split('.').pop().toLowerCase();
+  if (IMAGE_EXTS.includes(ext)) return 'image';
+  if (VIDEO_EXTS.includes(ext)) return 'video';
+  return null;
+}
+
+/** Render file links/embeds HTML (detail modal) */
 function renderFileLinksHtml(files) {
   if (!files?.length) return '';
   return '<div class="submission-files">' +
-    files.map(f => `<a class="file-link" href="${escapeHtml(f.url)}" target="_blank" rel="noopener">📄 ${escapeHtml(f.name)} (${formatSize(f.size)})</a>`).join('') +
+    files.map(f => {
+      const media = getMediaType(f.name);
+      if (media === 'image') {
+        return `<div class="file-media"><img class="file-embed-img" src="${escapeHtml(f.url)}" alt="${escapeHtml(f.name)}" loading="lazy"><div class="file-media-name">${escapeHtml(f.name)} (${formatSize(f.size)})</div></div>`;
+      }
+      if (media === 'video') {
+        return `<div class="file-media"><video class="file-embed-video" src="${escapeHtml(f.url)}" controls preload="metadata"></video><div class="file-media-name">${escapeHtml(f.name)} (${formatSize(f.size)})</div></div>`;
+      }
+      return `<a class="file-link" href="${escapeHtml(f.url)}" target="_blank" rel="noopener">📄 ${escapeHtml(f.name)} (${formatSize(f.size)})</a>`;
+    }).join('') +
+    '</div>';
+}
+
+/** Render file thumbnail for gallery cards */
+function renderFileThumbnailHtml(files) {
+  if (!files?.length) return '';
+  const firstImage = files.find(f => getMediaType(f.name) === 'image');
+  const firstVideo = files.find(f => getMediaType(f.name) === 'video');
+  let thumb = '';
+  if (firstImage) {
+    thumb = `<div class="card-thumbnail"><img src="${escapeHtml(firstImage.url)}" alt="" loading="lazy"></div>`;
+  } else if (firstVideo) {
+    thumb = `<div class="card-thumbnail"><video src="${escapeHtml(firstVideo.url)}" preload="metadata" muted></video><div class="card-thumbnail-badge">▶ 영상</div></div>`;
+  }
+  const otherCount = files.length - (thumb ? 1 : 0);
+  if (thumb) {
+    return thumb + (otherCount > 0 ? `<div class="card-files"><span class="card-file-more">+${otherCount}개 파일</span></div>` : '');
+  }
+  return '<div class="card-files">' +
+    files.slice(0, 3).map(f => `<span class="card-file-chip">📄 ${escapeHtml(truncate(f.name, 20))}</span>`).join('') +
+    (files.length > 3 ? `<span class="card-file-more">+${files.length - 3}개</span>` : '') +
     '</div>';
 }
 
@@ -268,6 +316,9 @@ let teacherEditMode = false; // true when teacher edits from board-view
 let selectedBoardType = 'assignment'; // 'assignment' | 'inquiry'
 let unsubscribeInquiryGallery = null;
 let unsubscribeInquiryBoard = null;
+let galleryDocs = [];
+let currentDetailIndex = -1;
+let unsubscribeComments = null;
 
 // ── Device ID ──
 function getDeviceId() {
@@ -586,11 +637,16 @@ function showGallery() {
   document.getElementById('gallery-student-name').textContent = studentName;
   renderDeadline('gallery-deadline', currentBoard.deadline);
 
+  // 마감 시 플로팅 제출 버튼 숨기기
+  const fab = document.querySelector('#gallery-view .fab');
+  if (fab) fab.style.display = isBoardClosed() ? 'none' : '';
+
   showView('gallery-view');
   location.hash = `gallery/${currentBoardCode}`;
 
   if (unsubscribeGallery) unsubscribeGallery();
   unsubscribeGallery = onSnapshot(submissionsQuery(currentBoardCode), (snapshot) => {
+    galleryDocs = snapshot.docs;
     renderGallery(snapshot.docs);
   });
 }
@@ -617,10 +673,7 @@ function renderGallery(docs) {
     } else if (data.type === 'text') {
       preview = `<div class="card-text">${escapeHtml(truncate(data.content, 120))}</div>`;
     } else if (data.files?.length) {
-      preview = '<div class="card-files">' +
-        data.files.slice(0, 3).map(f => `<span class="card-file-chip">📄 ${escapeHtml(truncate(f.name, 20))}</span>`).join('') +
-        (data.files.length > 3 ? `<span class="card-file-more">+${data.files.length - 3}개</span>` : '') +
-        '</div>';
+      preview = renderFileThumbnailHtml(data.files);
     }
 
     const updated = data.updatedAt ? ' · 수정됨' : '';
@@ -632,11 +685,12 @@ function renderGallery(docs) {
         <h3 class="card-title">${escapeHtml(data.title || '(제목 없음)')}</h3>
         ${preview}
         ${data.memo ? `<div class="card-memo">💬 ${escapeHtml(data.memo)}</div>` : ''}
+        <div class="card-comment-count" data-sub-id="${escapeHtml(d.id)}"></div>
         <div class="card-footer">
           <span class="card-author">${escapeHtml(data.name)}</span>
           <span class="card-time">${time}${updated}</span>
         </div>
-        ${isMine ? `
+        ${isMine && !isBoardClosed() ? `
           <div class="card-actions">
             <button class="btn-icon btn-edit" data-id="${escapeHtml(d.id)}" title="수정">✏️</button>
             <button class="btn-icon btn-icon-danger btn-del" data-id="${escapeHtml(d.id)}" title="삭제">🗑</button>
@@ -645,6 +699,7 @@ function renderGallery(docs) {
       </div>
     `;
   }).join('');
+  loadCommentCounts(docs.map(d => d.id));
 }
 
 // Event delegation for gallery (XSS-safe, no inline onclick with IDs)
@@ -662,11 +717,22 @@ document.getElementById('gallery-grid').addEventListener('click', (e) => {
 // ── Detail Modal ──
 async function openDetail(submissionId) {
   try {
-    const subDoc = await getDoc(doc(db, 'boards', currentBoardCode, 'submissions', submissionId));
-    if (!subDoc.exists()) return;
-    const data = subDoc.data();
+    // Use cached docs if available, otherwise fetch
+    currentDetailIndex = galleryDocs.findIndex(d => d.id === submissionId);
+    let data;
+    if (currentDetailIndex >= 0) {
+      data = galleryDocs[currentDetailIndex].data();
+    } else {
+      const subDoc = await getDoc(doc(db, 'boards', currentBoardCode, 'submissions', submissionId));
+      if (!subDoc.exists()) return;
+      data = subDoc.data();
+    }
 
     document.getElementById('detail-title').textContent = data.title || '(제목 없음)';
+
+    // Navigation buttons
+    document.getElementById('detail-prev').style.display = currentDetailIndex > 0 ? '' : 'none';
+    document.getElementById('detail-next').style.display = currentDetailIndex >= 0 && currentDetailIndex < galleryDocs.length - 1 ? '' : 'none';
 
     let html = `<div class="detail-meta">
       <span class="detail-author">${escapeHtml(data.name)}</span>
@@ -683,15 +749,290 @@ async function openDetail(submissionId) {
     html += renderFileLinksHtml(data.files);
     if (data.memo) html += `<div class="detail-memo">💬 ${escapeHtml(data.memo)}</div>`;
 
+    // Comments section
+    html += `<div class="detail-comments">
+      <h4 class="comments-title">💬 댓글 <span id="comment-count"></span></h4>
+      <div id="comments-list"></div>
+      <div class="comment-input-area">
+        <textarea id="comment-input" placeholder="댓글을 입력하세요" rows="2"></textarea>
+        <button class="btn btn-primary btn-small" id="comment-submit-btn" data-submission-id="${escapeHtml(submissionId)}">등록</button>
+      </div>
+    </div>`;
+
     document.getElementById('detail-body').innerHTML = html;
-    document.getElementById('detail-modal').style.display = 'flex';
-    openModalHistory();
+
+    // Setup comments real-time listener
+    setupCommentsListener(submissionId);
+
+    // Only push history on first open, not on navigation within modal
+    const modal = document.getElementById('detail-modal');
+    if (modal.style.display !== 'flex') {
+      modal.style.display = 'flex';
+      openModalHistory();
+    }
   } catch (e) {
     console.error(e);
   }
 }
 
-window.closeDetailModal = function() { closeModal('detail-modal'); };
+function navigateDetail(direction) {
+  const newIndex = currentDetailIndex + direction;
+  if (newIndex < 0 || newIndex >= galleryDocs.length) return;
+  if (unsubscribeComments) { unsubscribeComments(); unsubscribeComments = null; }
+  openDetail(galleryDocs[newIndex].id);
+}
+
+// Navigation buttons
+document.getElementById('detail-prev').addEventListener('click', () => navigateDetail(-1));
+document.getElementById('detail-next').addEventListener('click', () => navigateDetail(1));
+
+// Keyboard navigation (ArrowLeft/Right)
+document.addEventListener('keydown', (e) => {
+  if (document.getElementById('detail-modal').style.display !== 'flex') return;
+  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowLeft') navigateDetail(-1);
+  if (e.key === 'ArrowRight') navigateDetail(1);
+});
+
+// Touch swipe navigation on detail modal
+{
+  let swipeStartX = 0, swipeStartY = 0;
+  const detailContent = document.querySelector('#detail-modal .modal-content');
+  detailContent.addEventListener('touchstart', (e) => {
+    swipeStartX = e.touches[0].clientX;
+    swipeStartY = e.touches[0].clientY;
+  }, { passive: true });
+  detailContent.addEventListener('touchend', (e) => {
+    const dx = e.changedTouches[0].clientX - swipeStartX;
+    const dy = e.changedTouches[0].clientY - swipeStartY;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      navigateDetail(dx > 0 ? -1 : 1);
+    }
+  }, { passive: true });
+}
+
+window.closeDetailModal = function() {
+  if (unsubscribeComments) { unsubscribeComments(); unsubscribeComments = null; }
+  closeModal('detail-modal');
+};
+
+// ── Comments ──
+async function loadCommentCounts(submissionIds) {
+  const code = currentBoardCode;
+  for (const id of submissionIds) {
+    const el = document.querySelector(`.card-comment-count[data-sub-id="${id}"]`);
+    if (!el) continue;
+    try {
+      const snap = await getDocs(collection(db, 'boards', code, 'submissions', id, 'comments'));
+      const count = snap.docs.filter(d => !d.data().deleted).length;
+      el.innerHTML = count > 0 ? `<span class="card-comment-badge">💬 ${count}</span>` : '';
+    } catch (_) {}
+  }
+}
+
+function isCurrentBoardTeacher() {
+  return currentUser && currentBoard && currentBoard.ownerUid === currentUser.uid;
+}
+
+function setupCommentsListener(submissionId) {
+  if (unsubscribeComments) { unsubscribeComments(); unsubscribeComments = null; }
+  const commentsRef = collection(db, 'boards', currentBoardCode, 'submissions', submissionId, 'comments');
+  const q = query(commentsRef, orderBy('createdAt', 'asc'));
+  unsubscribeComments = onSnapshot(q, (snapshot) => {
+    const list = document.getElementById('comments-list');
+    const countEl = document.getElementById('comment-count');
+    if (!list) return;
+    const activeDocs = snapshot.docs.filter(d => !d.data().deleted);
+    countEl.textContent = activeDocs.length > 0 ? `(${activeDocs.length})` : '';
+    if (snapshot.docs.length === 0) {
+      list.innerHTML = '<div class="comments-empty">아직 댓글이 없습니다</div>';
+      return;
+    }
+    const teacher = isCurrentBoardTeacher();
+    list.innerHTML = snapshot.docs.map(d => {
+      const c = d.data();
+      const isMine = c.deviceId === deviceId;
+      const canEdit = isMine || teacher;
+      const time = c.createdAt ? formatDateShort(c.createdAt.toDate()) : '';
+
+      // Deleted comment
+      if (c.deleted) {
+        if (!teacher) return '';
+        const delTime = c.deletedAt ? formatDateShort(c.deletedAt.toDate()) : '';
+        return `<div class="comment-item comment-item-deleted">
+          <div class="comment-meta">
+            <span class="comment-author">${escapeHtml(c.name)}</span>
+            <span class="comment-time">${time}</span>
+          </div>
+          <div class="comment-content comment-deleted-text">삭제됨 (${escapeHtml(c.deletedBy || '')} · ${delTime})</div>
+          <div class="comment-original">원문: ${escapeHtml(c.content)}</div>
+          ${c.editHistory?.length ? renderEditHistory(c.editHistory) : ''}
+        </div>`;
+      }
+
+      // Edit history (teacher only)
+      let historyHtml = '';
+      if (teacher && c.editHistory?.length) {
+        historyHtml = renderEditHistory(c.editHistory);
+      }
+
+      return `<div class="comment-item ${isMine ? 'comment-item-mine' : ''}" data-comment-id="${escapeHtml(d.id)}">
+        <div class="comment-meta">
+          <span class="comment-author">${escapeHtml(c.name)}${isMine ? ' (나)' : ''}${c.editedAt ? ' · <span class="comment-edited">수정됨</span>' : ''}</span>
+          <span class="comment-time">${time}${canEdit ? `
+            <button class="comment-action-btn comment-edit-btn" data-comment-id="${escapeHtml(d.id)}" title="수정">✏️</button>
+            <button class="comment-action-btn comment-del-btn" data-comment-id="${escapeHtml(d.id)}" title="삭제">🗑</button>
+          ` : ''}</span>
+        </div>
+        <div class="comment-content" id="comment-content-${escapeHtml(d.id)}">${escapeHtml(c.content)}</div>
+        ${historyHtml}
+      </div>`;
+    }).join('');
+    list.scrollTop = list.scrollHeight;
+  });
+}
+
+function renderEditHistory(history) {
+  return `<details class="comment-history">
+    <summary>수정 이력 (${history.length})</summary>
+    ${history.map(h => {
+      const t = h.editedAt?.toDate ? formatDateShort(h.editedAt.toDate()) : '';
+      return `<div class="comment-history-item"><span class="comment-history-time">${t} (${escapeHtml(h.editedBy || '')})</span> ${escapeHtml(h.content)}</div>`;
+    }).join('')}
+  </details>`;
+}
+
+async function submitComment(submissionId) {
+  const input = document.getElementById('comment-input');
+  const content = input.value.trim();
+  if (!content) { toast('댓글을 입력하세요'); return; }
+
+  // Check if editing existing comment
+  const editId = input.dataset.editingCommentId;
+  if (editId) {
+    await saveCommentEdit(submissionId, editId, content);
+    input.dataset.editingCommentId = '';
+    input.placeholder = '댓글을 입력하세요';
+    document.getElementById('comment-edit-cancel')?.remove();
+    input.value = '';
+    return;
+  }
+
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const teacher = isCurrentBoardTeacher();
+  try {
+    await setDoc(doc(db, 'boards', currentBoardCode, 'submissions', submissionId, 'comments', id), {
+      content,
+      name: teacher ? (currentUser.displayName || currentUser.email) : studentName,
+      deviceId,
+      isTeacher: teacher || false,
+      createdAt: serverTimestamp()
+    });
+    input.value = '';
+  } catch (e) {
+    console.error(e);
+    toast('댓글 등록 실패');
+  }
+}
+
+async function saveCommentEdit(submissionId, commentId, newContent) {
+  const ref = doc(db, 'boards', currentBoardCode, 'submissions', submissionId, 'comments', commentId);
+  try {
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    const old = snap.data();
+    const editor = isCurrentBoardTeacher() ? '교사' : old.name;
+    const editHistory = old.editHistory || [];
+    editHistory.push({ content: old.content, editedAt: old.editedAt || old.createdAt, editedBy: editor });
+    await updateDoc(ref, {
+      content: newContent,
+      editedAt: serverTimestamp(),
+      editedBy: editor,
+      editHistory
+    });
+    toast('댓글이 수정되었습니다');
+  } catch (e) {
+    console.error(e);
+    toast('댓글 수정 실패');
+  }
+}
+
+async function deleteComment(submissionId, commentId) {
+  const ref = doc(db, 'boards', currentBoardCode, 'submissions', submissionId, 'comments', commentId);
+  try {
+    const deleter = isCurrentBoardTeacher() ? '교사' : '작성자';
+    await updateDoc(ref, {
+      deleted: true,
+      deletedAt: serverTimestamp(),
+      deletedBy: deleter
+    });
+    toast('댓글이 삭제되었습니다');
+  } catch (e) {
+    console.error(e);
+    toast('댓글 삭제 실패');
+  }
+}
+
+function startCommentEdit(commentId) {
+  const contentEl = document.getElementById(`comment-content-${commentId}`);
+  if (!contentEl) return;
+  const input = document.getElementById('comment-input');
+  const btn = document.getElementById('comment-submit-btn');
+  input.value = contentEl.textContent;
+  input.dataset.editingCommentId = commentId;
+  input.placeholder = '댓글 수정 중... (ESC로 취소)';
+  input.focus();
+  btn.textContent = '수정';
+  // Add cancel button if not exists
+  if (!document.getElementById('comment-edit-cancel')) {
+    const cancelBtn = document.createElement('button');
+    cancelBtn.id = 'comment-edit-cancel';
+    cancelBtn.className = 'btn btn-small';
+    cancelBtn.textContent = '취소';
+    cancelBtn.onclick = () => cancelCommentEdit();
+    btn.parentElement.appendChild(cancelBtn);
+  }
+}
+
+function cancelCommentEdit() {
+  const input = document.getElementById('comment-input');
+  const btn = document.getElementById('comment-submit-btn');
+  input.value = '';
+  input.dataset.editingCommentId = '';
+  input.placeholder = '댓글을 입력하세요';
+  btn.textContent = '등록';
+  document.getElementById('comment-edit-cancel')?.remove();
+}
+
+// Comment event delegation on detail-modal
+document.getElementById('detail-modal').addEventListener('click', (e) => {
+  const submitBtn = e.target.closest('#comment-submit-btn');
+  if (submitBtn) { submitComment(submitBtn.dataset.submissionId); return; }
+
+  const editBtn = e.target.closest('.comment-edit-btn');
+  if (editBtn) { startCommentEdit(editBtn.dataset.commentId); return; }
+
+  const delBtn = e.target.closest('.comment-del-btn');
+  if (delBtn) {
+    const subBtn = document.getElementById('comment-submit-btn');
+    deleteComment(subBtn.dataset.submissionId, delBtn.dataset.commentId);
+    return;
+  }
+});
+
+// Enter key to submit comment (Shift+Enter for newline), ESC to cancel edit
+document.getElementById('detail-modal').addEventListener('keydown', (e) => {
+  if (e.target.id === 'comment-input') {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const btn = document.getElementById('comment-submit-btn');
+      if (btn) submitComment(btn.dataset.submissionId);
+    }
+    if (e.key === 'Escape' && e.target.dataset.editingCommentId) {
+      cancelCommentEdit();
+    }
+  }
+});
 
 // ══════════════════════════════════════
 //  STUDENT: SUBMIT MODAL
@@ -711,6 +1052,7 @@ function resetSubmitForm() {
 }
 
 window.openSubmitForm = function() {
+  if (isBoardClosed()) { toast('마감된 보드입니다. 제출할 수 없습니다.'); return; }
   resetSubmitForm();
   document.getElementById('submit-modal-title').textContent = '과제 제출';
   setupTabs();
@@ -907,6 +1249,7 @@ function openEditModal(submissionId, data, isTeacher) {
 }
 
 async function editMySubmission(submissionId) {
+  if (isBoardClosed()) { toast('마감된 보드입니다. 수정할 수 없습니다.'); return; }
   try {
     const subDoc = await getDoc(doc(db, 'boards', currentBoardCode, 'submissions', submissionId));
     if (!subDoc.exists()) return;
@@ -916,7 +1259,8 @@ async function editMySubmission(submissionId) {
   } catch (e) { console.error(e); }
 }
 
-async function removeSubmission(id, { checkOwnership = false } = {}) {
+async function removeSubmission(id, { checkOwnership = false, isTeacher = false } = {}) {
+  if (!isTeacher && isBoardClosed()) { toast('마감된 보드입니다. 삭제할 수 없습니다.'); return; }
   try {
     const sub = await getDoc(doc(db, 'boards', currentBoardCode, 'submissions', id));
     if (!sub.exists()) return;
@@ -1221,7 +1565,7 @@ async function openBoard(code) {
     location.hash = `board/${code}`;
 
     if (unsubscribe) unsubscribe();
-    unsubscribe = onSnapshot(submissionsQuery(code), (snap) => renderSubmissions(snap.docs));
+    unsubscribe = onSnapshot(submissionsQuery(code), (snap) => { galleryDocs = snap.docs; renderSubmissions(snap.docs); });
   } catch (e) { toast('오류 발생'); }
 }
 
@@ -1255,10 +1599,7 @@ function renderSubmissions(docs) {
     } else if (data.type === 'text') {
       preview = `<div class="card-text">${escapeHtml(truncate(data.content, 120))}</div>`;
     } else if (data.files?.length) {
-      preview = '<div class="card-files">' +
-        data.files.slice(0, 3).map(f => `<span class="card-file-chip">📄 ${escapeHtml(truncate(f.name, 20))}</span>`).join('') +
-        (data.files.length > 3 ? `<span class="card-file-more">+${data.files.length - 3}개</span>` : '') +
-        '</div>';
+      preview = renderFileThumbnailHtml(data.files);
     }
 
     return `
@@ -1267,6 +1608,7 @@ function renderSubmissions(docs) {
         <h3 class="card-title">${escapeHtml(data.title || '(제목 없음)')}</h3>
         ${preview}
         ${data.memo ? `<div class="card-memo">💬 ${escapeHtml(data.memo)}</div>` : ''}
+        <div class="card-comment-count" data-sub-id="${escapeHtml(d.id)}"></div>
         <div class="card-footer">
           <span class="card-author">${escapeHtml(data.name)}</span>
           <span class="card-time">${time}${updated}</span>
@@ -1277,6 +1619,7 @@ function renderSubmissions(docs) {
         </div>
       </div>`;
   }).join('');
+  loadCommentCounts(sorted.map(({ doc: d }) => d.id));
 }
 
 // Event delegation for teacher submissions
@@ -1941,6 +2284,7 @@ window.addEventListener('popstate', () => {
     MODAL_IDS.forEach(id => { document.getElementById(id).style.display = 'none'; });
     existingFiles = null;
     teacherEditMode = false;
+    if (unsubscribeComments) { unsubscribeComments(); unsubscribeComments = null; }
     return;
   }
   handleRoute();

@@ -295,10 +295,14 @@
     <!-- 학생: 제출물 상세 모달 -->
     <div id="detail-modal" class="modal" style="display:none">
       <div class="modal-overlay" onclick="closeDetailModal()"></div>
-      <div class="modal-content">
-        <div class="modal-header">
+      <div class="modal-content detail-modal-content">
+        <div class="modal-header detail-modal-header">
+          <button class="detail-nav" id="detail-prev" style="display:none" title="이전">&#8249;</button>
           <h2 id="detail-title"></h2>
-          <button class="modal-close" onclick="closeDetailModal()">✕</button>
+          <div class="detail-header-right">
+            <button class="detail-nav" id="detail-next" style="display:none" title="다음">&#8250;</button>
+            <button class="modal-close" onclick="closeDetailModal()">✕</button>
+          </div>
         </div>
         <div class="modal-body" id="detail-body"></div>
       </div>
