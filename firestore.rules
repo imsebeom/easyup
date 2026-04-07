@@ -2,34 +2,50 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Helper: check if user is the board owner
+    function isOwner(boardCode) {
+      return request.auth != null
+        && request.auth.uid == get(/databases/$(database)/documents/boards/$(boardCode)).data.ownerUid;
+    }
+
+    // Helper: check if board is writable (not closed/private)
+    function isBoardOpen(boardCode) {
+      return get(/databases/$(database)/documents/boards/$(boardCode)).data.status == 'active';
+    }
+
     match /users/{userId} {
-      // Any authenticated user can read and create their own doc
       allow read, create: if request.auth != null && request.auth.uid == userId;
-      // Admin can list all users and update any user
-      allow list: if request.auth != null
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-      allow update: if request.auth != null
+      allow list, update: if request.auth != null
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
     match /boards/{boardCode} {
-      allow read, create: if true;
+      // Anyone can read boards (student join flow needs this)
+      allow read: if true;
+      // Authenticated users can create boards
+      allow create: if request.auth != null;
+      // Only owner can update/delete
       allow update, delete: if request.auth != null && request.auth.uid == resource.data.ownerUid;
 
       match /submissions/{submissionId} {
-        allow read: if true;
-        // 마감된 보드에서는 교사(보드 소유자)만 쓰기 가능
-        allow create: if get(/databases/$(database)/documents/boards/$(boardCode)).data.status != 'closed'
-          || (request.auth != null && request.auth.uid == get(/databases/$(database)/documents/boards/$(boardCode)).data.ownerUid);
-        allow update: if get(/databases/$(database)/documents/boards/$(boardCode)).data.status != 'closed'
-          || (request.auth != null && request.auth.uid == get(/databases/$(database)/documents/boards/$(boardCode)).data.ownerUid);
-        allow delete: if get(/databases/$(database)/documents/boards/$(boardCode)).data.status != 'closed'
-          || (request.auth != null && request.auth.uid == get(/databases/$(database)/documents/boards/$(boardCode)).data.ownerUid);
+        // Private boards: only owner can read
+        allow read: if resource == null
+          || get(/databases/$(database)/documents/boards/$(boardCode)).data.status != 'private'
+          || isOwner(boardCode);
+
+        // Create: board must be open, or owner can always create
+        allow create: if isBoardOpen(boardCode) || isOwner(boardCode);
+        // Update/Delete: board must be open, or owner can always modify
+        allow update, delete: if isBoardOpen(boardCode) || isOwner(boardCode);
 
         match /comments/{commentId} {
-          allow read, create: if true;
-          // 교사(보드 소유자)는 모든 댓글 수정/삭제 가능
-          allow update, delete: if true;
+          // Private boards: only owner can read comments
+          allow read: if get(/databases/$(database)/documents/boards/$(boardCode)).data.status != 'private'
+            || isOwner(boardCode);
+          // Create: board must be open, or owner
+          allow create: if isBoardOpen(boardCode) || isOwner(boardCode);
+          // Update/Delete: board must be open, or owner
+          allow update, delete: if isBoardOpen(boardCode) || isOwner(boardCode);
         }
       }
     }
