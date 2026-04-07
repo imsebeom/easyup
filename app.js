@@ -2445,7 +2445,7 @@ const CL = {
   allCards: [], cards: [], tree: [], cardMap: {},
   currentView: 'tree', currentPage: 'overview',
   workspaceId: '',
-  searchQuery: '', folderParentId: '',
+  searchQuery: '', folderParentId: '', bookPage: 0,
   editingCardId: null, addParentId: null, addType: null,
   contextCardId: null, dragCardId: null,
   isTeacher: false,
@@ -2465,22 +2465,25 @@ function clBuildHash(isTeacher) {
   if (CL.currentView === 'folder') {
     h += '/folder';
     if (CL.folderParentId) h += `/${CL.folderParentId}`;
+  } else if (CL.currentView === 'book') {
+    h += '/book';
   }
   return h;
 }
 
 /** Parse classify sub-route from hash. Returns null if not a classify sub-route. */
 function clParseSubRoute(hash) {
-  // Student: classify/CODE[/ws/WSID[/folder[/PARENTID]]]
-  // Teacher: board/CODE[/ws/WSID[/folder[/PARENTID]]]
-  const m = hash.match(/^(classify|board)\/([A-Z0-9]+)(\/ws\/([^/]+)(\/folder(\/(.+))?)?)?$/);
+  // Student: classify/CODE[/ws/WSID[/(folder[/PARENTID]|book)]]
+  // Teacher: board/CODE[/ws/WSID[/(folder[/PARENTID]|book)]]
+  const m = hash.match(/^(classify|board)\/([A-Z0-9]+)(\/ws\/([^/]+)(\/(folder(\/(.+))?|book))?)?$/);
   if (!m) return null;
+  const viewSegment = m[6] || ''; // 'folder', 'folder/ID', or 'book'
   return {
     type: m[1], // 'classify' or 'board'
     code: m[2],
     wsId: m[4] || '',
-    view: m[5] ? 'folder' : (m[4] ? 'tree' : ''),
-    folderId: m[7] || '',
+    view: viewSegment === 'book' ? 'book' : (m[5] ? 'folder' : (m[4] ? 'tree' : '')),
+    folderId: m[8] || '',
   };
 }
 
@@ -2524,6 +2527,16 @@ function clIsMyWorkspace() {
 
 function clSubsRef() {
   return collection(db, 'boards', currentBoardCode, 'submissions');
+}
+
+/** Get editable workspace title (falls back to board title) */
+function clGetWsTitle() {
+  if (!CL.workspaceId) return currentBoard?.title || '';
+  const settings = currentBoard?.settings || {};
+  if (settings.groupMode === 'team') {
+    return currentBoard?.groups?.[CL.workspaceId]?.wsTitle || currentBoard?.title || '';
+  }
+  return currentBoard?.members?.[CL.workspaceId]?.wsTitle || currentBoard?.title || '';
 }
 
 /** Build tree from flat card list */
@@ -2584,6 +2597,14 @@ function clRenderCurrentView(containerId) {
     clRenderOverview(containerId);
   } else if (CL.currentView === 'folder') {
     clRenderFolderView(containerId);
+  } else if (CL.currentView === 'book') {
+    // If overlay already open, just refresh its content
+    if (document.getElementById('cl-book-overlay')) {
+      CL.bookPages = clBuildBookPages();
+      clBookGoTo(CL.bookPage || 0);
+    } else {
+      clRenderBookView(containerId);
+    }
   } else {
     clRenderTreeView(containerId);
   }
@@ -2929,6 +2950,7 @@ function showClassifyBoard(code) {
 window.clSwitchView = function(view, containerId) {
   CL.currentView = view;
   if (view === 'folder') CL.folderParentId = '';
+  if (view === 'book') CL.bookPage = 0;
   const parent = document.getElementById(containerId)?.closest('.view');
   if (parent) {
     parent.querySelectorAll('.cl-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
@@ -2955,9 +2977,10 @@ function clRenderTreeView(containerId) {
   const isTeacher = CL.isTeacher;
   const canAdd = clIsMyWorkspace() && (!isBoardClosed() || isTeacher);
 
-  // Root node: always board title (과제명)
-  const rootTitle = currentBoard?.title || '';
+  // Root node: workspace custom title or board title
+  const rootTitle = clGetWsTitle();
   const totalCount = CL.cards.filter(c => c.cardType !== 'category').length;
+  const canEditTitle = clIsMyWorkspace() && (!isBoardClosed() || isTeacher);
 
   let html = '<div class="cl-tree-canvas"><div class="cl-tree-root">';
   // Root node
@@ -2965,6 +2988,7 @@ function clRenderTreeView(containerId) {
     <div class="cl-node-box cl-root-node" data-card-id="__root__">
       <div class="cl-node-header">
         <span class="cl-node-title">${escapeHtml(rootTitle)}</span>
+        ${canEditTitle ? `<button class="cl-root-edit-btn" title="제목 변경">✏️</button>` : ''}
       </div>
       <div class="cl-node-meta"><span class="cl-node-badge">${totalCount}개 항목</span></div>
       ${canAdd ? `<button class="cl-add-btn" data-parent="" data-container="${containerId}" title="항목 추가">+</button>` : ''}
@@ -3205,6 +3229,424 @@ function clBuildBreadcrumb() {
 }
 
 // ══════════════════════════════════════
+//  CLASSIFY: BOOK VIEW (풀스크린 사전 프레젠테이션)
+// ══════════════════════════════════════
+
+/** Build book pages array: cover → toc → content spreads */
+function clBuildBookPages() {
+  const pages = [];
+  const categories = CL.tree; // top-level categories with children
+
+  // Page 0: Cover
+  pages.push({ type: 'cover' });
+
+  // Page 1: Table of Contents — all categories flattened with depth
+  const tocItems = [];
+  function collectTocItems(nodes, depth) {
+    for (const node of nodes) {
+      if (node.cardType === 'category') {
+        tocItems.push({ ...node, depth });
+        const subCats = (node.children || []).filter(c => c.cardType === 'category');
+        collectTocItems(subCats, depth + 1);
+      }
+    }
+  }
+  collectTocItems(categories, 0);
+  pages.push({ type: 'toc', categories: tocItems });
+
+  // Content: categories → subsections → entries
+  // depth 0 = fullpage (양쪽 전체), depth 1+ = left page only (점진 축소)
+  function addCategoryPages(cat, depth) {
+    const directEntries = (cat.children || []).filter(c => c.cardType !== 'category');
+    const subCats = (cat.children || []).filter(c => c.cardType === 'category');
+
+    if (depth === 0) {
+      // Top-level: full spread chapter page
+      pages.push({ type: 'chapter', card: cat, depth });
+      // Entries as pairs
+      for (let i = 0; i < directEntries.length; i += 2) {
+        const left = { type: 'entry', card: directEntries[i] };
+        const right = (i + 1 < directEntries.length) ? { type: 'entry', card: directEntries[i + 1] } : null;
+        pages.push({ type: 'spread', left, right });
+      }
+    } else {
+      // Sub-level: section on left, first entry on right
+      const sectionSide = { type: 'section', card: cat, depth };
+      if (directEntries.length === 0) {
+        pages.push({ type: 'spread', left: sectionSide, right: null });
+      } else {
+        pages.push({ type: 'spread', left: sectionSide, right: { type: 'entry', card: directEntries[0] } });
+        for (let i = 1; i < directEntries.length; i += 2) {
+          const left = { type: 'entry', card: directEntries[i] };
+          const right = (i + 1 < directEntries.length) ? { type: 'entry', card: directEntries[i + 1] } : null;
+          pages.push({ type: 'spread', left, right });
+        }
+      }
+    }
+
+    for (const sc of subCats) {
+      addCategoryPages(sc, depth + 1);
+    }
+  }
+
+  for (const cat of categories) {
+    addCategoryPages(cat, 0);
+  }
+
+  // If no content at all, add an empty page
+  if (pages.length <= 2) {
+    pages.push({ type: 'spread', left: null, right: null });
+  }
+
+  return pages;
+}
+
+/** Render the fullscreen book overlay */
+function clRenderBookView(containerId) {
+  // Remove existing overlay if any
+  let overlay = document.getElementById('cl-book-overlay');
+  if (overlay) overlay.remove();
+
+  const pages = clBuildBookPages();
+  const totalPages = pages.length;
+  const page = Math.min(CL.bookPage || 0, totalPages - 1);
+  CL.bookPage = page;
+  CL.bookPages = pages;
+
+  overlay = document.createElement('div');
+  overlay.id = 'cl-book-overlay';
+  overlay.innerHTML = `
+    <div class="clb-container">
+      <div class="clb-page-wrapper">
+        ${clRenderBookPage(pages[page], page, totalPages)}
+      </div>
+      <div class="clb-controls">
+        <button class="clb-close" title="닫기">✕</button>
+        <div class="clb-nav">
+          <button class="clb-prev" ${page <= 0 ? 'disabled' : ''}>‹</button>
+          <span class="clb-page-num">${page + 1} / ${totalPages}</span>
+          <button class="clb-next" ${page >= totalPages - 1 ? 'disabled' : ''}>›</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('clb-open'));
+
+  // Hide parent UI
+  const parentView = document.getElementById(containerId)?.closest('.view');
+  if (parentView) parentView.style.display = 'none';
+  CL._bookParentView = parentView;
+  CL._bookContainerId = containerId;
+}
+
+/** Render a single book page content based on type */
+function clRenderBookPage(pageData, pageIdx, totalPages) {
+  if (!pageData) return '';
+
+  if (pageData.type === 'cover') {
+    const title = clGetWsTitle() || '사전';
+    const desc = currentBoard?.description || '';
+    // Find workspace name
+    let wsName = '';
+    if (CL.workspaceId) {
+      const settings = currentBoard?.settings || {};
+      if (settings.groupMode === 'team') {
+        const groups = currentBoard?.groups || {};
+        for (const [gid, g] of Object.entries(groups)) {
+          if (gid === CL.workspaceId) { wsName = g.name || gid; break; }
+        }
+      } else {
+        const members = currentBoard?.members || {};
+        for (const [did, m] of Object.entries(members)) {
+          if (did === CL.workspaceId) { wsName = m.name || ''; break; }
+        }
+      }
+    }
+    const cardCount = CL.cards.filter(c => c.cardType !== 'category').length;
+    const catCount = CL.cards.filter(c => c.cardType === 'category').length;
+
+    return `
+      <div class="clb-cover">
+        <div class="clb-cover-ornament top"></div>
+        <div class="clb-cover-content">
+          <div class="clb-cover-label">우리들의 사전</div>
+          <h1 class="clb-cover-title">${escapeHtml(title)}</h1>
+          ${desc ? `<p class="clb-cover-desc">${escapeHtml(desc)}</p>` : ''}
+          ${wsName ? `<div class="clb-cover-author">${escapeHtml(wsName)}</div>` : ''}
+          <div class="clb-cover-stats">${catCount}개 분류 · ${cardCount}개 항목</div>
+        </div>
+        <div class="clb-cover-ornament bottom"></div>
+      </div>`;
+  }
+
+  if (pageData.type === 'toc') {
+    const cats = pageData.categories || [];
+    let tocHtml = cats.map(cat => {
+      const entryCount = (cat.children || []).filter(c => c.cardType !== 'category').length;
+      const color = cat.color || CL_COLORS[Math.abs(hashStr(cat.id)) % CL_COLORS.length];
+      const indent = (cat.depth || 0) * 20;
+      const isSub = (cat.depth || 0) > 0;
+      return `<div class="clb-toc-item ${isSub ? 'clb-toc-sub' : ''}" data-toc-id="${escapeHtml(cat.id)}" style="padding-left:${8 + indent}px">
+        <span class="clb-toc-dot${isSub ? ' clb-toc-dot-sub' : ''}" style="background:${color}"></span>
+        <span class="clb-toc-label">${escapeHtml(cat.title || '')}</span>
+        <span class="clb-toc-line"></span>
+        <span class="clb-toc-count">${entryCount > 0 ? entryCount + '개' : ''}</span>
+      </div>`;
+    }).join('');
+
+    return `
+      <div class="clb-toc">
+        <div class="clb-page-header">목 차</div>
+        <div class="clb-toc-list">${tocHtml}</div>
+      </div>`;
+  }
+
+  if (pageData.type === 'chapter') {
+    // Full-spread chapter page for top-level categories
+    const card = pageData.card;
+    const color = card.color || CL_COLORS[Math.abs(hashStr(card.id)) % CL_COLORS.length];
+    const childCount = (card.children || []).filter(c => c.cardType !== 'category').length;
+    const subCatCount = (card.children || []).filter(c => c.cardType === 'category').length;
+    const starCount = (card.stars || []).length;
+    const isStarred = (card.stars || []).includes(deviceId);
+    return `
+      <div class="clb-chapter" style="--ch-color:${color}">
+        <div class="clb-chapter-deco top" style="background:${color}"></div>
+        <div class="clb-chapter-body">
+          <div class="clb-chapter-label">Chapter</div>
+          <h1 class="clb-chapter-title">${escapeHtml(card.title || '')}</h1>
+          ${card.content ? `<p class="clb-chapter-desc">${escapeHtml(card.content)}</p>` : ''}
+          ${card.imageUrl ? `<div class="clb-chapter-img"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
+          <div class="clb-chapter-stats">
+            ${childCount}개 항목${subCatCount > 0 ? ` · ${subCatCount}개 하위 분류` : ''}
+          </div>
+          <button class="cl-star-btn ${isStarred ? 'cl-starred' : ''}" data-id="${escapeHtml(card.id)}">
+            ${isStarred ? '★' : '☆'} ${starCount > 0 ? starCount : ''}
+          </button>
+        </div>
+        <div class="clb-chapter-deco bottom" style="background:${color}"></div>
+      </div>`;
+  }
+
+  if (pageData.type === 'spread') {
+    return `
+      <div class="clb-spread">
+        <div class="clb-left">${clRenderBookSide(pageData.left)}</div>
+        <div class="clb-spine"></div>
+        <div class="clb-right">${clRenderBookSide(pageData.right)}</div>
+      </div>`;
+  }
+
+  return '';
+}
+
+/** Build breadcrumb HTML for a card's ancestor path */
+function clBookBreadcrumb(card) {
+  const ancestors = [];
+  let pid = card.parentId;
+  while (pid && CL.cardMap[pid]) {
+    ancestors.unshift(CL.cardMap[pid]);
+    pid = CL.cardMap[pid].parentId || '';
+  }
+  if (ancestors.length === 0) return '';
+  const crumbs = ancestors.map(a => {
+    const color = a.color || CL_COLORS[Math.abs(hashStr(a.id)) % CL_COLORS.length];
+    return `<span class="clb-crumb" style="--crumb-color:${color}">${escapeHtml(a.title || '')}</span>`;
+  });
+  return `<div class="clb-breadcrumb">${crumbs.join('<span class="clb-crumb-sep">›</span>')}</div>`;
+}
+
+/** Render one side (left or right) of a spread */
+function clRenderBookSide(side) {
+  if (!side) {
+    return '<div class="clb-side-empty"><div class="clb-watermark">📖</div></div>';
+  }
+
+  const card = side.card;
+  const isCategory = card.cardType === 'category';
+  const color = card.color || (isCategory ? CL_COLORS[Math.abs(hashStr(card.id)) % CL_COLORS.length] : '#6B7280');
+  const starCount = (card.stars || []).length;
+  const isStarred = (card.stars || []).includes(deviceId);
+
+  if (side.type === 'section') {
+    // Sub-level category — depth-based progressive scaling
+    const depth = side.depth || 1;
+    const childCount = (card.children || []).filter(c => c.cardType !== 'category').length;
+    const subCatCount = (card.children || []).filter(c => c.cardType === 'category').length;
+    // Progressive sizing: depth 1 = largest, each level shrinks
+    const titleSize = Math.max(1.0, 1.6 - (depth - 1) * 0.2);
+    const barWidth = Math.max(20, 44 - (depth - 1) * 8);
+    const barHeight = Math.max(2, 4 - (depth - 1));
+    const labelText = depth === 1 ? '분류' : `${'하위 '.repeat(Math.min(depth - 1, 3))}분류`;
+    const breadcrumb = clBookBreadcrumb(card);
+    return `
+      <div class="clb-section clb-section-d${Math.min(depth, 4)}" style="--sec-color:${color}">
+        ${breadcrumb}
+        <div class="clb-section-bar" style="background:${color};width:${barWidth}px;height:${barHeight}px"></div>
+        <div class="clb-section-body">
+          <div class="clb-section-label">${labelText}</div>
+          <h2 class="clb-section-title" style="font-size:${titleSize}rem">${escapeHtml(card.title || '')}</h2>
+          ${card.content ? `<p class="clb-section-desc">${escapeHtml(card.content)}</p>` : ''}
+          ${card.imageUrl ? `<div class="clb-section-img"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
+          <div class="clb-section-stats">
+            ${childCount}개 항목${subCatCount > 0 ? ` · ${subCatCount}개 하위 분류` : ''}
+          </div>
+          <button class="cl-star-btn ${isStarred ? 'cl-starred' : ''}" data-id="${escapeHtml(card.id)}">
+            ${isStarred ? '★' : '☆'} ${starCount > 0 ? starCount : ''}
+          </button>
+        </div>
+      </div>`;
+  }
+
+  // Entry — dictionary-style card with quote/definition look
+  const time = card.createdAt ? formatDateShort(card.createdAt.toDate()) : '';
+  const breadcrumb = clBookBreadcrumb(card);
+  return `
+    <div class="clb-entry" data-id="${escapeHtml(card.id)}" data-type="${card.cardType}" style="--entry-color:${color}">
+      ${breadcrumb}
+      <div class="clb-entry-word">${escapeHtml(card.title || '')}</div>
+      ${card.imageUrl ? `<div class="clb-entry-img"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
+      ${card.content ? `<div class="clb-entry-desc">${escapeHtml(card.content)}</div>` : ''}
+      <div class="clb-entry-footer">
+        <span class="clb-entry-author">${escapeHtml(card.name || '')}</span>
+        <span class="clb-entry-time">${time}</span>
+        <button class="cl-star-btn ${isStarred ? 'cl-starred' : ''}" data-id="${escapeHtml(card.id)}">
+          ${isStarred ? '★' : '☆'} ${starCount > 0 ? starCount : ''}
+        </button>
+      </div>
+    </div>`;
+}
+
+/** Navigate book and re-render page content only */
+window.clBookNavigate = function(dir) {
+  const pages = CL.bookPages;
+  if (!pages) return;
+  const maxPage = pages.length - 1;
+  const newPage = Math.max(0, Math.min(maxPage, (CL.bookPage || 0) + dir));
+  if (newPage === CL.bookPage) return;
+  CL.bookPage = newPage;
+
+  const overlay = document.getElementById('cl-book-overlay');
+  if (!overlay) return;
+  const wrapper = overlay.querySelector('.clb-page-wrapper');
+  const pageNum = overlay.querySelector('.clb-page-num');
+  const prevBtn = overlay.querySelector('.clb-prev');
+  const nextBtn = overlay.querySelector('.clb-next');
+
+  // Animate page flip
+  const direction = dir > 0 ? 'clb-flip-left' : 'clb-flip-right';
+  wrapper.classList.add(direction);
+  setTimeout(() => {
+    wrapper.innerHTML = clRenderBookPage(pages[newPage], newPage, pages.length);
+    wrapper.classList.remove(direction);
+    wrapper.classList.add('clb-flip-in');
+    setTimeout(() => wrapper.classList.remove('clb-flip-in'), 300);
+  }, 150);
+
+  pageNum.textContent = `${newPage + 1} / ${pages.length}`;
+  prevBtn.disabled = newPage <= 0;
+  nextBtn.disabled = newPage >= maxPage;
+};
+
+/** Jump to a specific book page */
+window.clBookGoTo = function(pageIdx) {
+  const pages = CL.bookPages;
+  if (!pages) return;
+  CL.bookPage = Math.max(0, Math.min(pages.length - 1, pageIdx));
+
+  const overlay = document.getElementById('cl-book-overlay');
+  if (!overlay) return;
+  const wrapper = overlay.querySelector('.clb-page-wrapper');
+  const pageNum = overlay.querySelector('.clb-page-num');
+  const prevBtn = overlay.querySelector('.clb-prev');
+  const nextBtn = overlay.querySelector('.clb-next');
+
+  wrapper.innerHTML = clRenderBookPage(pages[CL.bookPage], CL.bookPage, pages.length);
+  pageNum.textContent = `${CL.bookPage + 1} / ${pages.length}`;
+  prevBtn.disabled = CL.bookPage <= 0;
+  nextBtn.disabled = CL.bookPage >= pages.length - 1;
+};
+
+/** Close book overlay and restore UI */
+window.clCloseBook = function() {
+  const overlay = document.getElementById('cl-book-overlay');
+  if (overlay) {
+    overlay.classList.remove('clb-open');
+    setTimeout(() => overlay.remove(), 300);
+  }
+  if (CL._bookParentView) CL._bookParentView.style.display = '';
+  // Switch back to tree view
+  CL.currentView = 'tree';
+  const containerId = CL._bookContainerId;
+  if (containerId) {
+    const parent = document.getElementById(containerId)?.closest('.view');
+    if (parent) parent.querySelectorAll('.cl-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === 'tree'));
+    clRenderCurrentView(containerId);
+    const isBoard = containerId === 'cl-board-container';
+    location.hash = clBuildHash(isBoard);
+  }
+};
+
+// Book overlay event delegation
+document.addEventListener('click', (e) => {
+  const overlay = document.getElementById('cl-book-overlay');
+  if (!overlay) return;
+
+  if (e.target.closest('.clb-close')) { clCloseBook(); return; }
+  if (e.target.closest('.clb-prev')) { clBookNavigate(-1); return; }
+  if (e.target.closest('.clb-next')) { clBookNavigate(1); return; }
+
+  // TOC item click → jump to that category's page
+  const tocItem = e.target.closest('.clb-toc-item');
+  if (tocItem) {
+    const catId = tocItem.dataset.tocId;
+    if (catId) {
+      // Find the chapter or spread page containing this category
+      const pages = CL.bookPages || [];
+      let targetPage = 2;
+      for (let i = 2; i < pages.length; i++) {
+        const p = pages[i];
+        if (p.type === 'chapter' && p.card?.id === catId) { targetPage = i; break; }
+        if (p.type === 'spread') {
+          if (p.left?.card?.id === catId || p.right?.card?.id === catId) { targetPage = i; break; }
+        }
+      }
+      clBookGoTo(targetPage);
+    }
+    return;
+  }
+
+  // Star button inside book
+  const starBtn = e.target.closest('.cl-star-btn');
+  if (starBtn && starBtn.dataset.id) { clToggleStar(starBtn.dataset.id); return; }
+});
+
+// Book keyboard navigation
+document.addEventListener('keydown', (e) => {
+  if (!document.getElementById('cl-book-overlay')) return;
+  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowLeft') { clBookNavigate(-1); e.preventDefault(); }
+  if (e.key === 'ArrowRight') { clBookNavigate(1); e.preventDefault(); }
+  if (e.key === 'Escape') { clCloseBook(); e.preventDefault(); }
+});
+
+// Book touch swipe
+{
+  let bSwipeX = 0;
+  document.addEventListener('touchstart', (e) => {
+    if (!document.getElementById('cl-book-overlay')) return;
+    bSwipeX = e.touches[0].clientX;
+  }, { passive: true });
+  document.addEventListener('touchend', (e) => {
+    if (!document.getElementById('cl-book-overlay') || !bSwipeX) return;
+    const dx = e.changedTouches[0].clientX - bSwipeX;
+    bSwipeX = 0;
+    if (Math.abs(dx) < 50) return;
+    clBookNavigate(dx > 0 ? -1 : 1);
+  }, { passive: true });
+}
+
+// ══════════════════════════════════════
 //  CLASSIFY: CARD CRUD
 // ══════════════════════════════════════
 /** Open editor modal for new or existing card */
@@ -3255,10 +3697,9 @@ window.clOpenCardEditor = function(cardId, parentId, cardType) {
   if (fileInput) fileInput.value = '';
   CL.editorNewFile = null;
 
-  // Hide image/content for category (title only)
+  // Hide image for category, but allow content (description)
   const isCategory = cardId ? CL.cardMap[cardId]?.cardType === 'category' : CL.addType === 'category';
   document.getElementById('cl-editor-image-group').style.display = isCategory ? 'none' : '';
-  document.getElementById('cl-editor-content-group').style.display = isCategory ? 'none' : '';
 
   modal.style.display = 'flex';
   openModalHistory();
@@ -3426,6 +3867,24 @@ async function clMoveCard(cardId, newParentId) {
     });
     toast('이동됨');
   } catch (e) { toast('이동 실패'); }
+}
+
+/** Edit workspace root title (prompt-based) */
+async function clEditWsTitle(containerId) {
+  const current = clGetWsTitle();
+  const newTitle = prompt('사전 제목을 입력하세요', current);
+  if (newTitle === null || newTitle.trim() === current) return;
+  const title = newTitle.trim() || (currentBoard?.title || '');
+  try {
+    const boardRef = doc(db, 'boards', currentBoardCode);
+    const settings = currentBoard?.settings || {};
+    if (settings.groupMode === 'team') {
+      await updateDoc(boardRef, { [`groups.${CL.workspaceId}.wsTitle`]: title });
+    } else {
+      await updateDoc(boardRef, { [`members.${CL.workspaceId}.wsTitle`]: title });
+    }
+    toast('제목이 변경되었습니다');
+  } catch (e) { console.error(e); toast('제목 변경 실패'); }
 }
 
 /** Toggle star on a card */
@@ -3673,6 +4132,14 @@ function clSetupEvents(containerId) {
       return;
     }
 
+    // Root title edit button
+    const rootEditBtn = e.target.closest('.cl-root-edit-btn');
+    if (rootEditBtn) {
+      e.stopPropagation();
+      clEditWsTitle(containerId);
+      return;
+    }
+
     // Add button (+ on tree nodes)
     const addBtn = e.target.closest('.cl-add-btn');
     if (addBtn) {
@@ -3753,6 +4220,7 @@ function clSetupEvents(containerId) {
       location.hash = clBuildHash(isBoard);
       return;
     }
+
   });
 
   // Right-click context menu on node boxes
