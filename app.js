@@ -30,6 +30,8 @@ const INQUIRY_CATEGORIES = {
 // Student-selectable categories (excluding teacher-only ones)
 const STUDENT_CATEGORIES = ['factual', 'conceptual', 'debatable'];
 
+const CL_GROUP_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'];
+
 // ── Touch Drag Utility ──
 // Unified touch drag system for both inquiry shelf and assignment list
 function setupTouchDrag(container, {
@@ -203,12 +205,17 @@ function setTextVisibility(elementId, text) {
   el.style.display = text ? 'block' : 'none';
 }
 
-/** Check if the current board is closed (by status or deadline) */
+/** Check if the current board is closed (by status, deadline, or private) */
 function isBoardClosed() {
   if (!currentBoard) return false;
-  if (currentBoard.status === 'closed') return true;
+  if (currentBoard.status === 'closed' || currentBoard.status === 'private') return true;
   if (currentBoard.deadline && new Date() > new Date(currentBoard.deadline)) return true;
   return false;
+}
+
+/** Check if the current board is private (students cannot even view) */
+function isBoardPrivate() {
+  return currentBoard?.status === 'private';
 }
 
 /** Render deadline notice into an element */
@@ -319,9 +326,12 @@ let teacherEditMode = false; // true when teacher edits from board-view
 let selectedBoardType = 'assignment'; // 'assignment' | 'inquiry'
 let unsubscribeInquiryGallery = null;
 let unsubscribeInquiryBoard = null;
+let unsubscribeClassifyGallery = null;
+let unsubscribeClassifyBoard = null;
 let galleryDocs = [];
 let currentDetailIndex = -1;
 let unsubscribeComments = null;
+let unsubscribeBoardDoc = null; // board doc listener for allowPeek sync
 
 // ── Device ID ──
 function getDeviceId() {
@@ -342,6 +352,9 @@ window.showView = function(viewId) {
   if (unsubscribeGallery && viewId !== 'gallery-view') { unsubscribeGallery(); unsubscribeGallery = null; }
   if (unsubscribeInquiryGallery && viewId !== 'inquiry-gallery-view') { unsubscribeInquiryGallery(); unsubscribeInquiryGallery = null; }
   if (unsubscribeInquiryBoard && viewId !== 'inquiry-board-view') { unsubscribeInquiryBoard(); unsubscribeInquiryBoard = null; }
+  if (unsubscribeClassifyGallery && viewId !== 'classify-gallery-view') { unsubscribeClassifyGallery(); unsubscribeClassifyGallery = null; }
+  if (unsubscribeClassifyBoard && viewId !== 'classify-board-view') { unsubscribeClassifyBoard(); unsubscribeClassifyBoard = null; }
+  if (unsubscribeBoardDoc && viewId !== 'gallery-view' && viewId !== 'inquiry-gallery-view') { unsubscribeBoardDoc(); unsubscribeBoardDoc = null; }
   if (viewId === 'users-view') loadUsers();
 };
 
@@ -387,7 +400,7 @@ async function checkUserApproval(user) {
 // Student routes: handle immediately before auth (no flash of login screen)
 (function earlyStudentRoute() {
   const hash = location.hash.slice(1);
-  if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/')) {
+  if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/') || hash.startsWith('classify/')) {
     handleStudentRoute(hash.split('/')[1].toUpperCase());
   }
 })();
@@ -397,7 +410,7 @@ onAuthStateChanged(auth, async (user) => {
   const hash = location.hash.slice(1);
 
   // Student route: already handled by earlyStudentRoute or popstate
-  if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/')) {
+  if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/') || hash.startsWith('classify/')) {
     return;
   }
 
@@ -539,7 +552,7 @@ document.getElementById('users-list').addEventListener('click', (e) => {
 function handleRoute() {
   const hash = location.hash.slice(1);
   // Student routes (no auth needed)
-  if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/')) {
+  if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/') || hash.startsWith('classify/')) {
     handleStudentRoute(hash.split('/')[1].toUpperCase());
     return true;
   }
@@ -565,6 +578,12 @@ async function handleStudentRoute(code) {
     currentBoard.code = code;
     currentBoardCode = code;
 
+    if (currentBoard.status === 'private') {
+      document.getElementById('private-board-title').textContent = currentBoard.title;
+      showView('private-view');
+      return;
+    }
+
     const savedName = localStorage.getItem(`easyup_name_${code}`);
     if (savedName) {
       studentName = savedName;
@@ -586,14 +605,46 @@ function showNameView() {
   setTextVisibility('name-board-desc', currentBoard.description);
   renderDeadline('name-deadline-notice', currentBoard.deadline);
   document.getElementById('student-name-input').value = '';
+
+  // Show team select for classify team boards
+  const teamSelectDiv = document.getElementById('name-team-select');
+  const teamSelect = document.getElementById('student-team-select');
+  if (currentBoard?.type === 'classify' && currentBoard?.settings?.groupMode === 'team') {
+    const groups = currentBoard.groups || {};
+    const members = currentBoard.members || {};
+    teamSelect.innerHTML = Object.entries(groups)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([gId, g]) => {
+        const gMembers = Object.entries(members).filter(([, m]) => m.groupId === gId).map(([, m]) => m.name);
+        const memberStr = gMembers.length > 0 ? ` (${gMembers.join(', ')})` : ' (아직 없음)';
+        return `<option value="${gId}">${g.name}${memberStr}</option>`;
+      })
+      .join('');
+    // Restore saved group selection
+    const savedGroupId = localStorage.getItem(`easyup_group_${currentBoardCode}`);
+    if (savedGroupId && groups[savedGroupId]) teamSelect.value = savedGroupId;
+    teamSelectDiv.style.display = 'block';
+  } else {
+    teamSelectDiv.style.display = 'none';
+  }
+
   showView('name-view');
   location.hash = `join/${currentBoardCode}`;
   setTimeout(() => document.getElementById('student-name-input').focus(), 100);
 }
 
-window.enterBoard = function() {
+window.enterBoard = async function() {
   const name = document.getElementById('student-name-input').value.trim();
   if (!name) { toast('이름을 입력하세요'); return; }
+
+  // For classify team boards, save team selection
+  if (currentBoard?.type === 'classify' && currentBoard?.settings?.groupMode === 'team') {
+    const teamSelect = document.getElementById('student-team-select');
+    const groupId = teamSelect?.value;
+    if (!groupId) { toast('모둠을 선택하세요'); return; }
+    localStorage.setItem(`easyup_group_${currentBoardCode}`, groupId);
+  }
+
   studentName = name;
   localStorage.setItem(`easyup_name_${currentBoardCode}`, name);
   showGallery();
@@ -614,14 +665,37 @@ window.changeStudentName = function() {
   setTimeout(() => document.getElementById('change-name-input').focus(), 100);
 };
 
-window.saveChangedName = function() {
+window.saveChangedName = async function() {
   const name = document.getElementById('change-name-input').value.trim();
   if (!name) { toast('이름을 입력하세요'); return; }
   studentName = name;
   localStorage.setItem(`easyup_name_${currentBoardCode}`, name);
   document.getElementById('gallery-student-name').textContent = name;
   document.getElementById('inquiry-gallery-student-name').textContent = name;
+  const clNameEl = document.getElementById('classify-gallery-student-name');
+  if (clNameEl) {
+    const settings = currentBoard?.settings || {};
+    if (settings.groupMode === 'team') {
+      const savedGroupId = localStorage.getItem(`easyup_group_${currentBoardCode}`);
+      const groupName = savedGroupId && currentBoard.groups?.[savedGroupId]?.name;
+      clNameEl.textContent = groupName ? `${name} (${groupName})` : name;
+    } else {
+      clNameEl.textContent = name;
+    }
+  }
   closeModal('change-name-modal');
+
+  // Update name in all my submissions and board member entry
+  if (currentBoardCode) {
+    try {
+      const subs = await getDocs(query(collection(db, 'boards', currentBoardCode, 'submissions'), where('deviceId', '==', deviceId)));
+      await Promise.all(subs.docs.map(d => updateDoc(d.ref, { name })));
+      // Update board member name
+      if (currentBoard?.members?.[deviceId]) {
+        await updateDoc(doc(db, 'boards', currentBoardCode), { [`members.${deviceId}.name`]: name });
+      }
+    } catch (e) { console.error('Name update failed:', e); }
+  }
   toast('이름이 변경되었습니다');
 };
 
@@ -632,6 +706,10 @@ function showGallery() {
   // Branch by board type
   if (currentBoard.type === 'inquiry') {
     showInquiryGallery();
+    return;
+  }
+  if (currentBoard.type === 'classify') {
+    showClassifyGallery();
     return;
   }
 
@@ -652,9 +730,24 @@ function showGallery() {
     galleryDocs = snapshot.docs;
     renderGallery(snapshot.docs);
   });
+
+  // Board doc listener for real-time allowPeek sync
+  if (unsubscribeBoardDoc) unsubscribeBoardDoc();
+  unsubscribeBoardDoc = onSnapshot(doc(db, 'boards', currentBoardCode), (snap) => {
+    if (snap.exists()) {
+      const prev = currentBoard.allowPeek;
+      currentBoard.allowPeek = snap.data().allowPeek;
+      currentBoard.status = snap.data().status;
+      if (prev !== currentBoard.allowPeek && galleryDocs.length) renderGallery(galleryDocs);
+    }
+  });
 }
 
 function renderGallery(docs) {
+  // 서로보기 차단 시 자기 제출물만 표시
+  if (currentBoard?.allowPeek === false) {
+    docs = docs.filter(d => d.data().deviceId === deviceId);
+  }
   const grid = document.getElementById('gallery-grid');
   document.getElementById('gallery-count').textContent = `${docs.length}개 제출물`;
 
@@ -1328,12 +1421,15 @@ function renderDashboard() {
 
   container.innerHTML = filtered.map(b => {
     const isClosed = b.status === 'closed';
-    const isExpired = !isClosed && b.deadline && new Date() > new Date(b.deadline);
-    const typeBadge = b.type === 'inquiry' ? '🔬 질문판' : '📋 과제';
+    const isPrivate = b.status === 'private';
+    const isExpired = !isClosed && !isPrivate && b.deadline && new Date() > new Date(b.deadline);
+    const typeBadge = b.type === 'inquiry' ? '🔬 질문판' : b.type === 'classify' ? '🗂 분류' : '📋 과제';
     let statusBadge;
-    if (isClosed) statusBadge = '<span class="badge badge-expired">마감</span>';
+    if (isPrivate) statusBadge = '<span class="badge badge-private">비공개</span>';
+    else if (isClosed) statusBadge = '<span class="badge badge-expired">마감</span>';
     else if (isExpired) statusBadge = '<span class="badge badge-expired">기한초과</span>';
     else statusBadge = '<span class="badge badge-active">진행중</span>';
+    const statusBtnLabel = isPrivate ? '재시작' : isClosed ? '비공개' : '마감';
 
     return `<div class="board-card" data-code="${escapeHtml(b.code)}">
       <div class="board-card-header">
@@ -1352,7 +1448,7 @@ function renderDashboard() {
         <a href="${getJoinLink(b.code)}" target="_blank" class="btn btn-sm btn-secondary btn-equal">미리보기</a>
         <button class="btn btn-sm btn-secondary btn-equal btn-edit-board" data-code="${escapeHtml(b.code)}">편집</button>
         <button class="btn btn-sm btn-secondary btn-equal btn-open-board" data-code="${escapeHtml(b.code)}">결과</button>
-        <button class="btn btn-sm btn-danger-light btn-equal btn-toggle-status" data-code="${escapeHtml(b.code)}">${isClosed ? '시작' : '마감'}</button>
+        <button class="btn btn-sm btn-danger-light btn-equal btn-toggle-status" data-code="${escapeHtml(b.code)}">${statusBtnLabel}</button>
         <button class="btn btn-sm btn-secondary btn-equal btn-duplicate" data-code="${escapeHtml(b.code)}">복제</button>
         <button class="btn btn-sm btn-secondary btn-equal btn-toggle-hidden" data-code="${escapeHtml(b.code)}">${b.hidden ? '꺼내기' : '숨기기'}</button>
         <button class="btn btn-sm btn-danger-light btn-equal btn-del-board" data-code="${escapeHtml(b.code)}" data-title="${escapeHtml(b.title)}">삭제</button>
@@ -1422,11 +1518,26 @@ async function updateBoardField(code, field, newVal, successMsg, errMsg = '변�
   } catch (e) { toast(errMsg); }
 }
 
-function toggleBoardStatus(code) {
+async function toggleBoardStatus(code) {
   const board = allBoards.find(b => b.code === code);
   if (!board) return;
-  const newStatus = board.status === 'closed' ? 'active' : 'closed';
-  updateBoardField(code, 'status', newStatus, newStatus === 'closed' ? '마감됨' : '다시 시작됨', '상태 변경 실패');
+  // 3단계 순환: active → closed → private → active
+  const next = { active: 'closed', closed: 'private', private: 'active' };
+  const msg = { closed: '마감됨', private: '비공개 전환됨', active: '다시 시작됨' };
+  const newStatus = next[board.status] || 'closed';
+
+  if (newStatus === 'active' && board.deadline) {
+    // 재시작 시 기한마감 제거
+    try {
+      await updateDoc(doc(db, 'boards', code), { status: 'active', deadline: null });
+      board.status = 'active';
+      board.deadline = null;
+      renderDashboard();
+      toast('다시 시작됨 (마감일 제거)');
+    } catch (e) { toast('상태 변경 실패'); }
+  } else {
+    updateBoardField(code, 'status', newStatus, msg[newStatus], '상태 변경 실패');
+  }
 }
 
 function toggleBoardHidden(code) {
@@ -1449,11 +1560,24 @@ async function duplicateBoard(code) {
   };
   if (board.type === 'assignment') {
     Object.assign(boardData, { allowUrl: board.allowUrl ?? true, allowText: board.allowText ?? true, allowFile: board.allowFile ?? true });
-  } else {
+  } else if (board.type === 'inquiry') {
     boardData.categories = board.categories || Object.keys(INQUIRY_CATEGORIES);
   }
+  // classify: 카테고리는 submissions로 존재하므로 보드 복제 시 카테고리도 함께 복제
   try {
     await setDoc(doc(db, 'boards', newCode), boardData);
+    // classify: 카테고리 submissions 복제
+    if (board.type === 'classify') {
+      const subs = await getDocs(collection(db, 'boards', code, 'submissions'));
+      for (const s of subs.docs) {
+        const data = s.data();
+        if (data.cardType === 'category') {
+          await setDoc(doc(db, 'boards', newCode, 'submissions', s.id), {
+            ...data, boardCode: newCode, createdAt: serverTimestamp()
+          });
+        }
+      }
+    }
     allBoards.push({ ...boardData, code: newCode, submissionCount: 0, createdAtMs: Date.now() });
     renderDashboard();
     toast('복제 완료');
@@ -1495,10 +1619,18 @@ window.selectBoardType = function(type) {
   document.querySelectorAll('.type-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.type === type));
   document.getElementById('assignment-options').style.display = type === 'assignment' ? 'block' : 'none';
   document.getElementById('inquiry-options').style.display = type === 'inquiry' ? 'block' : 'none';
-  // Update placeholder
+  document.getElementById('classify-options').style.display = type === 'classify' ? 'block' : 'none';
   const titleInput = document.getElementById('board-title');
-  titleInput.placeholder = type === 'inquiry' ? '예: 3단원 탐구 질문' : '예: 3월 독서감상문';
+  const placeholders = { assignment: '예: 3월 독서감상문', inquiry: '예: 3단원 탐구 질문', classify: '예: 동식물 분류하기' };
+  titleInput.placeholder = placeholders[type] || '';
 };
+
+// Classify mode radio toggle
+document.querySelectorAll('input[name="classify-mode"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    document.getElementById('classify-team-options').style.display = e.target.value === 'team' ? 'block' : 'none';
+  });
+});
 
 window.createBoard = async function() {
   if (!currentUser) return;
@@ -1522,12 +1654,31 @@ window.createBoard = async function() {
     const allowFile = document.getElementById('allow-file').checked;
     if (!allowUrl && !allowText && !allowFile) { toast('최소 하나의 제출 방식을 선택하세요'); return; }
     Object.assign(boardData, { allowUrl, allowText, allowFile });
-  } else {
+  } else if (selectedBoardType === 'inquiry') {
     boardData.categories = Object.keys(INQUIRY_CATEGORIES);
+  }
+  if (selectedBoardType === 'classify') {
+    const modeRadio = document.querySelector('input[name="classify-mode"]:checked');
+    const mode = modeRadio ? modeRadio.value : 'individual';
+    boardData.settings = { groupMode: mode };
+    boardData.members = {};
+    if (mode === 'team') {
+      const groupCount = parseInt(document.getElementById('classify-group-count').value) || 6;
+      const groups = {};
+      for (let i = 1; i <= groupCount; i++) {
+        groups[`g${i}`] = {
+          name: `${i}모둠`,
+          color: CL_GROUP_COLORS[(i - 1) % CL_GROUP_COLORS.length],
+          members: []
+        };
+      }
+      boardData.groups = groups;
+    }
   }
 
   try {
     await setDoc(doc(db, 'boards', code), boardData);
+
     currentBoardCode = code;
     document.getElementById('created-code').textContent = code;
     showView('created-view');
@@ -1562,10 +1713,15 @@ async function openBoard(code) {
       showInquiryBoard(code);
       return;
     }
+    if (currentBoard.type === 'classify') {
+      showClassifyBoard(code);
+      return;
+    }
 
     document.getElementById('board-title-display').textContent = currentBoard.title;
     document.getElementById('board-code-badge').textContent = `코드: ${code}`;
     setTextVisibility('board-desc-display', currentBoard.description);
+    updatePeekToggleBtn('board-peek-toggle');
 
     showView('board-view');
     location.hash = `board/${code}`;
@@ -1759,7 +1915,7 @@ window.openEditBoardModal = function() {
   document.getElementById('edit-board-desc').value = currentBoard.description || '';
   document.getElementById('edit-board-deadline').value = currentBoard.deadline || '';
 
-  const isAssignment = currentBoard.type !== 'inquiry';
+  const isAssignment = currentBoard.type === 'assignment';
   document.getElementById('edit-assignment-options').style.display = isAssignment ? 'block' : 'none';
   if (isAssignment) {
     document.getElementById('edit-allow-url').checked = currentBoard.allowUrl !== false;
@@ -1784,7 +1940,7 @@ window.saveEditBoard = async function() {
     deadline: document.getElementById('edit-board-deadline').value || null,
   };
 
-  if (currentBoard.type !== 'inquiry') {
+  if (currentBoard.type === 'assignment') {
     const allowUrl = document.getElementById('edit-allow-url').checked;
     const allowText = document.getElementById('edit-allow-text').checked;
     const allowFile = document.getElementById('edit-allow-file').checked;
@@ -1801,6 +1957,9 @@ window.saveEditBoard = async function() {
     if (currentBoard.type === 'inquiry') {
       document.getElementById('inquiry-board-title-display').textContent = title;
       setTextVisibility('inquiry-board-desc-display', updateData.description);
+    } else if (currentBoard.type === 'classify') {
+      document.getElementById('classify-board-title-display').textContent = title;
+      setTextVisibility('classify-board-desc-display', updateData.description);
     } else {
       document.getElementById('board-title-display').textContent = title;
       setTextVisibility('board-desc-display', updateData.description);
@@ -1900,15 +2059,32 @@ function showInquiryGallery() {
   location.hash = `inquiry/${currentBoardCode}`;
 
   if (unsubscribeInquiryGallery) unsubscribeInquiryGallery();
+  let inquiryDocs = [];
   unsubscribeInquiryGallery = onSnapshot(
     query(collection(db, 'boards', currentBoardCode, 'submissions'), orderBy('createdAt', 'desc')),
-    (snapshot) => renderInquiryShelf(snapshot.docs, 'inquiry-gallery-shelf', false)
+    (snapshot) => { inquiryDocs = snapshot.docs; renderInquiryShelf(snapshot.docs, 'inquiry-gallery-shelf', false); }
   );
+
+  // Board doc listener for real-time allowPeek sync
+  if (unsubscribeBoardDoc) unsubscribeBoardDoc();
+  unsubscribeBoardDoc = onSnapshot(doc(db, 'boards', currentBoardCode), (snap) => {
+    if (snap.exists()) {
+      const prev = currentBoard.allowPeek;
+      currentBoard.allowPeek = snap.data().allowPeek;
+      currentBoard.status = snap.data().status;
+      if (prev !== currentBoard.allowPeek && inquiryDocs.length) renderInquiryShelf(inquiryDocs, 'inquiry-gallery-shelf', false);
+    }
+  });
 }
 
 function renderInquiryShelf(docs, containerId, isTeacher) {
   const container = document.getElementById(containerId);
   const categories = currentBoard.categories || Object.keys(INQUIRY_CATEGORIES);
+
+  // 서로보기 차단 시 학생은 자기 질문만 표시
+  if (!isTeacher && currentBoard?.allowPeek === false) {
+    docs = docs.filter(d => d.data().deviceId === deviceId);
+  }
 
   // Group by category
   const grouped = {};
@@ -2248,6 +2424,7 @@ function showInquiryBoard(code) {
   document.getElementById('inquiry-board-title-display').textContent = currentBoard.title;
   document.getElementById('inquiry-board-code-badge').textContent = `코드: ${code}`;
   setTextVisibility('inquiry-board-desc-display', currentBoard.description);
+  updatePeekToggleBtn('inquiry-peek-toggle');
 
   showView('inquiry-board-view');
   location.hash = `board/${code}`;
@@ -2259,8 +2436,1507 @@ function showInquiryBoard(code) {
   );
 }
 
+// ══════════════════════════════════════
+//  CLASSIFY: TREE + FOLDER VIEW (마인드맵 사전)
+// ══════════════════════════════════════
+const CL_COLORS = ['#4A90D9', '#27AE60', '#E67E22', '#E74C3C', '#9B59B6', '#1ABC9C', '#F1C40F', '#34495E', '#E91E63', '#00BCD4'];
+
+const CL = {
+  allCards: [], cards: [], tree: [], cardMap: {},
+  currentView: 'tree', currentPage: 'overview',
+  workspaceId: '',
+  searchQuery: '', folderParentId: '',
+  editingCardId: null, addParentId: null, addType: null,
+  contextCardId: null, dragCardId: null,
+  isTeacher: false,
+  // Editor state (replaces window._ globals)
+  editorImageUrl: '', editorImagePath: '', editorNewFile: null,
+  addPopupParentId: undefined, moveCardId: null,
+  modalClosing: false,
+  boardUnsub: null, // board doc listener for member updates
+};
+
+// ── Classify Sub-Routing ──
+/** Build classify hash from current CL state */
+function clBuildHash(isTeacher) {
+  const prefix = isTeacher ? `board/${currentBoardCode}` : `classify/${currentBoardCode}`;
+  if (CL.currentPage !== 'workspace' || !CL.workspaceId) return prefix;
+  let h = `${prefix}/ws/${CL.workspaceId}`;
+  if (CL.currentView === 'folder') {
+    h += '/folder';
+    if (CL.folderParentId) h += `/${CL.folderParentId}`;
+  }
+  return h;
+}
+
+/** Parse classify sub-route from hash. Returns null if not a classify sub-route. */
+function clParseSubRoute(hash) {
+  // Student: classify/CODE[/ws/WSID[/folder[/PARENTID]]]
+  // Teacher: board/CODE[/ws/WSID[/folder[/PARENTID]]]
+  const m = hash.match(/^(classify|board)\/([A-Z0-9]+)(\/ws\/([^/]+)(\/folder(\/(.+))?)?)?$/);
+  if (!m) return null;
+  return {
+    type: m[1], // 'classify' or 'board'
+    code: m[2],
+    wsId: m[4] || '',
+    view: m[5] ? 'folder' : (m[4] ? 'tree' : ''),
+    folderId: m[7] || '',
+  };
+}
+
+/** Navigate CL state from parsed sub-route without re-subscribing */
+function clApplySubRoute(parsed, containerId) {
+  if (!parsed.wsId) {
+    // Overview
+    CL.currentPage = 'overview';
+    CL.workspaceId = '';
+  } else {
+    // Workspace
+    CL.currentPage = 'workspace';
+    CL.workspaceId = parsed.wsId;
+    CL.currentView = parsed.view || 'tree';
+    CL.folderParentId = parsed.folderId || '';
+  }
+  CL.searchQuery = '';
+  const isBoard = containerId === 'cl-board-container';
+  const searchInput = document.getElementById(isBoard ? 'cl-search-board' : 'cl-search-gallery');
+  if (searchInput) searchInput.value = '';
+  // Update view toggle buttons
+  const parent = document.getElementById(containerId)?.closest('.view');
+  if (parent) {
+    parent.querySelectorAll('.cl-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === CL.currentView));
+  }
+  clBuildTree();
+  clRenderCurrentView(containerId);
+}
+
+/** Check if current workspace belongs to the current user */
+function clIsMyWorkspace() {
+  if (CL.isTeacher) return true; // teacher can edit anything
+  if (!CL.workspaceId) return false;
+  const settings = currentBoard?.settings || {};
+  if (settings.groupMode === 'team') {
+    const savedGroupId = localStorage.getItem(`easyup_group_${currentBoardCode}`);
+    return CL.workspaceId === savedGroupId;
+  }
+  return CL.workspaceId === deviceId;
+}
+
+function clSubsRef() {
+  return collection(db, 'boards', currentBoardCode, 'submissions');
+}
+
+/** Build tree from flat card list */
+function clBuildTree() {
+  CL.cardMap = {};
+  CL.allCards.forEach(c => { CL.cardMap[c.id] = c; });
+
+  // Filter by workspace
+  let wsFiltered = CL.allCards;
+  if (CL.currentPage === 'workspace' && CL.workspaceId) {
+    wsFiltered = wsFiltered.filter(c => c.workspaceId === CL.workspaceId);
+  }
+
+  // Filter by search
+  let filtered = wsFiltered;
+  if (CL.searchQuery) {
+    const q = CL.searchQuery.toLowerCase();
+    const matched = wsFiltered.filter(c =>
+      (c.title || '').toLowerCase().includes(q) ||
+      (c.content || '').toLowerCase().includes(q)
+    );
+    // Include ancestors of matched cards
+    const ids = new Set(matched.map(c => c.id));
+    matched.forEach(c => {
+      let pid = c.parentId;
+      while (pid && CL.cardMap[pid]) {
+        ids.add(pid);
+        pid = CL.cardMap[pid].parentId;
+      }
+    });
+    filtered = wsFiltered.filter(c => ids.has(c.id));
+  }
+  CL.cards = filtered;
+
+  // Group by parentId
+  const children = {};
+  filtered.forEach(c => {
+    const pid = c.parentId || '';
+    if (!children[pid]) children[pid] = [];
+    children[pid].push(c);
+  });
+  // Sort children by order
+  Object.values(children).forEach(arr => arr.sort((a, b) => (a.order || 0) - (b.order || 0)));
+
+  function build(parentId) {
+    return (children[parentId] || []).map(c => ({
+      ...c,
+      children: build(c.id)
+    }));
+  }
+  CL.tree = build('');
+}
+
+/** Render current view (overview, tree, or folder) */
+function clRenderCurrentView(containerId) {
+  clUpdateToolbarVisibility(containerId);
+  if (CL.currentPage === 'overview') {
+    clRenderOverview(containerId);
+  } else if (CL.currentView === 'folder') {
+    clRenderFolderView(containerId);
+  } else {
+    clRenderTreeView(containerId);
+  }
+}
+
+/** Show/hide toolbar elements based on current page */
+function clUpdateToolbarVisibility(containerId) {
+  const isBoard = containerId === 'cl-board-container';
+  const prefix = isBoard ? 'cl-board' : 'cl-gallery';
+  const backBtn = document.getElementById(`${prefix}-back-btn`);
+  const viewToggle = document.getElementById(`${prefix}-view-toggle`);
+  const searchBox = document.getElementById(`${prefix}-search-box`);
+  const inWorkspace = CL.currentPage === 'workspace';
+  if (backBtn) backBtn.style.display = inWorkspace ? '' : 'none';
+  if (viewToggle) viewToggle.style.display = inWorkspace ? '' : 'none';
+  if (searchBox) searchBox.style.display = inWorkspace ? '' : 'none';
+  // Reset add popup
+  const addPopup = document.getElementById(`${prefix}-add-popup`);
+  if (addPopup) addPopup.style.display = 'none';
+  // Dynamic FAB: only in folder view workspace
+  const view = document.getElementById(containerId)?.closest('.view');
+  if (view) {
+    let fab = view.querySelector('.cl-fab');
+    const showFab = inWorkspace && CL.currentView === 'folder' && clIsMyWorkspace() && (!isBoardClosed() || CL.isTeacher);
+    if (showFab) {
+      if (!fab) {
+        fab = document.createElement('button');
+        fab.className = 'cl-fab';
+        fab.textContent = '+';
+        fab.onclick = () => clOpenAddPopup(containerId);
+        view.appendChild(fab);
+      }
+      fab.style.display = '';
+    } else if (fab) {
+      fab.style.display = 'none';
+    }
+  }
+}
+
+/** Pre-compute entry counts per workspace */
+function clGetCardCountMap() {
+  const map = {};
+  CL.allCards.forEach(c => {
+    if (c.cardType !== 'category' && c.workspaceId) {
+      map[c.workspaceId] = (map[c.workspaceId] || 0) + 1;
+    }
+  });
+  return map;
+}
+
+/** Get my groupId from board.members */
+function clGetMyGroupId() {
+  const members = currentBoard?.members || {};
+  const me = members[deviceId];
+  return me?.groupId || '';
+}
+
+/** Render overview page (list of workspaces) */
+function clRenderOverview(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const settings = currentBoard?.settings || {};
+  const mode = settings.groupMode || 'individual';
+  const members = currentBoard?.members || {};
+  const memberEntries = Object.entries(members);
+
+  // Update member count badge
+  const memberCountEl = document.getElementById(CL.isTeacher ? 'classify-board-member-count' : 'classify-gallery-member-count');
+  if (memberCountEl) memberCountEl.textContent = `👥 ${memberEntries.length}명`;
+
+  const allowPeek = currentBoard?.allowPeek !== false;
+  const canSeeAll = CL.isTeacher || allowPeek;
+  const cardCountMap = clGetCardCountMap();
+  let html = '';
+
+  if (mode === 'team') {
+    const groups = currentBoard?.groups || {};
+    let groupEntries = Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
+    if (!canSeeAll) {
+      const myGroupId = clGetMyGroupId();
+      groupEntries = groupEntries.filter(([gId]) => gId === myGroupId);
+    }
+    if (groupEntries.length === 0) {
+      html = '<div class="empty-state" style="padding:40px"><p>모둠이 없습니다.</p></div>';
+    } else {
+      html = '<div class="cl-overview-grid">';
+      groupEntries.forEach(([gId, g]) => {
+        const gMembers = memberEntries.filter(([, m]) => m.groupId === gId);
+        const cardCount = cardCountMap[gId] || 0;
+        const color = g.color || '#4A90D9';
+        const memberNames = gMembers.map(([, m]) => escapeHtml(m.name)).join(', ') || '아직 없음';
+        html += `
+          <div class="cl-overview-card" data-ws-id="${escapeHtml(gId)}" style="border-color:${color}">
+            <div class="cl-overview-icon">👥</div>
+            <div class="cl-overview-name" style="color:${color}">${escapeHtml(g.name)}</div>
+            <div class="cl-overview-sub">${cardCount}개 항목</div>
+            <div class="cl-overview-members">${memberNames}</div>
+          </div>`;
+      });
+      html += '</div>';
+    }
+  } else {
+    // Individual mode
+    let visibleMembers = memberEntries;
+    if (!canSeeAll) {
+      visibleMembers = memberEntries.filter(([dId]) => dId === deviceId);
+    }
+    if (visibleMembers.length === 0) {
+      html = '<div class="empty-state" style="padding:40px"><div class="empty-state-icon">👤</div><p>아직 참여한 학생이 없습니다.</p></div>';
+    } else {
+      html = '<div class="cl-overview-grid">';
+      visibleMembers.forEach(([dId, m]) => {
+        const cardCount = cardCountMap[dId] || 0;
+        html += `
+          <div class="cl-overview-card" data-ws-id="${escapeHtml(dId)}">
+            <div class="cl-overview-icon">👤</div>
+            <div class="cl-overview-name">${escapeHtml(m.name)}</div>
+            <div class="cl-overview-sub">${cardCount}개 항목</div>
+          </div>`;
+      });
+      html += '</div>';
+    }
+  }
+
+  container.innerHTML = html;
+}
+
+/** Enter a specific workspace from overview */
+window.clEnterWorkspace = function(wsId, containerId) {
+  // Block peek if disabled (student can only access own workspace)
+  if (!CL.isTeacher && currentBoard?.allowPeek === false) {
+    const settings = currentBoard?.settings || {};
+    if (settings.groupMode === 'team') {
+      if (wsId !== clGetMyGroupId()) { toast('다른 모둠은 볼 수 없습니다.'); return; }
+    } else {
+      if (wsId !== deviceId) { toast('다른 학생의 사전은 볼 수 없습니다.'); return; }
+    }
+  }
+  CL.workspaceId = wsId;
+  CL.currentPage = 'workspace';
+  CL.currentView = 'tree';
+  CL.folderParentId = '';
+  CL.searchQuery = '';
+  const isBoard = containerId === 'cl-board-container';
+  const searchInput = document.getElementById(isBoard ? 'cl-search-board' : 'cl-search-gallery');
+  if (searchInput) searchInput.value = '';
+  clBuildTree();
+  clRenderCurrentView(containerId);
+  location.hash = clBuildHash(isBoard);
+};
+
+/** Go back to overview from workspace */
+window.clBackToOverview = function(containerId) {
+  CL.currentPage = 'overview';
+  CL.workspaceId = '';
+  CL.searchQuery = '';
+  const isBoard = containerId === 'cl-board-container';
+  clBuildTree();
+  clRenderCurrentView(containerId);
+  location.hash = clBuildHash(isBoard);
+};
+
+/** Copy join code (student view) */
+window.clCopyJoinCode = function() {
+  if (currentBoardCode) {
+    navigator.clipboard.writeText(currentBoardCode);
+    toast('코드 복사됨');
+  }
+};
+
+/** Populate group dropdown (called on gallery load and member updates) */
+function clPopulateGroupSelect() {
+  const select = document.getElementById('cl-group-select');
+  if (!select) return;
+  const settings = currentBoard?.settings || {};
+  // Hide if not team mode, or if peek is disabled (can't change group)
+  if (settings.groupMode !== 'team' || currentBoard?.allowPeek === false) { select.style.display = 'none'; return; }
+
+  const groups = currentBoard?.groups || {};
+  const members = currentBoard?.members || {};
+  const currentGroupId = localStorage.getItem(`easyup_group_${currentBoardCode}`) || '';
+
+  select.innerHTML = Object.entries(groups)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([gId, g]) => {
+      const gMembers = Object.entries(members).filter(([, m]) => m.groupId === gId).map(([, m]) => m.name);
+      const memberStr = gMembers.length > 0 ? ` (${gMembers.join(', ')})` : '';
+      return `<option value="${gId}" ${gId === currentGroupId ? 'selected' : ''}>${g.name}${memberStr}</option>`;
+    }).join('');
+  select.style.display = '';
+}
+
+/** Handle group dropdown change */
+window.clOnGroupChange = async function(newGroupId) {
+  if (!newGroupId) return;
+  const groups = currentBoard?.groups || {};
+  localStorage.setItem(`easyup_group_${currentBoardCode}`, newGroupId);
+  try {
+    await updateDoc(doc(db, 'boards', currentBoardCode), {
+      [`members.${deviceId}`]: { name: studentName, groupId: newGroupId }
+    });
+    toast(`${groups[newGroupId]?.name || newGroupId}으로 변경됨`);
+    // Update name badge with new group
+    const nameEl = document.getElementById('classify-gallery-student-name');
+    if (nameEl) nameEl.textContent = `${studentName} (${groups[newGroupId]?.name || ''})`;
+    CL.currentPage = 'overview';
+    CL.workspaceId = '';
+    clBuildTree();
+    clRenderCurrentView('cl-gallery-container');
+  } catch (e) { toast('변경 실패'); }
+};
+
+/** Subscribe to classify data and render */
+function clSubscribe(containerId, isTeacher) {
+  CL.isTeacher = isTeacher;
+  // Subscribe to submissions
+  const unsubCards = onSnapshot(
+    query(clSubsRef(), orderBy('createdAt', 'asc')),
+    (snap) => {
+      CL.allCards = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      clBuildTree();
+      clRenderCurrentView(containerId);
+      // Update count
+      const cats = CL.allCards.filter(c => c.cardType === 'category').length;
+      const entries = CL.allCards.filter(c => c.cardType === 'entry').length;
+      const countEl = document.getElementById(isTeacher ? 'classify-submission-count' : 'classify-gallery-count');
+      if (countEl) countEl.textContent = `${cats}개 분류 · ${entries}개 항목`;
+    }
+  );
+  // Subscribe to board doc for member updates
+  if (CL.boardUnsub) CL.boardUnsub();
+  CL.boardUnsub = onSnapshot(doc(db, 'boards', currentBoardCode), (snap) => {
+    if (snap.exists()) {
+      const data = snap.data();
+      currentBoard.members = data.members || {};
+      currentBoard.groups = data.groups || {};
+      currentBoard.settings = data.settings || {};
+      currentBoard.allowPeek = data.allowPeek;
+      if (isTeacher) clUpdatePeekButton();
+      // Re-render overview if on overview page
+      if (CL.currentPage === 'overview') {
+        clRenderOverview(containerId);
+      }
+      // Update member count
+      const memberCount = Object.keys(currentBoard.members || {}).length;
+      const memberCountEl = document.getElementById(isTeacher ? 'classify-board-member-count' : 'classify-gallery-member-count');
+      if (memberCountEl) memberCountEl.textContent = `👥 ${memberCount}명`;
+      // Refresh group dropdown on member changes
+      if (!isTeacher) {
+        clPopulateGroupSelect();
+        // Sync student name if teacher changed it
+        const myMember = currentBoard.members[deviceId];
+        if (myMember && myMember.name && myMember.name !== studentName) {
+          studentName = myMember.name;
+          localStorage.setItem(`easyup_name_${currentBoardCode}`, studentName);
+          const nameEl = document.getElementById('classify-gallery-student-name');
+          if (nameEl) {
+            const groupName = myMember.groupId && currentBoard.groups?.[myMember.groupId]?.name;
+            nameEl.textContent = groupName ? `${studentName} (${groupName})` : studentName;
+          }
+        }
+      }
+    }
+  });
+  return () => { unsubCards(); if (CL.boardUnsub) { CL.boardUnsub(); CL.boardUnsub = null; } };
+}
+
+// ── Student Gallery ──
+async function showClassifyGallery() {
+  document.getElementById('classify-gallery-title').textContent = currentBoard.title;
+  setTextVisibility('classify-gallery-desc', currentBoard.description);
+  // Show student name with group if team mode
+  const nameEl = document.getElementById('classify-gallery-student-name');
+  if (currentBoard?.settings?.groupMode === 'team') {
+    const savedGroupId = localStorage.getItem(`easyup_group_${currentBoardCode}`);
+    const groupName = savedGroupId && currentBoard.groups?.[savedGroupId]?.name;
+    nameEl.textContent = groupName ? `${studentName} (${groupName})` : studentName;
+  } else {
+    nameEl.textContent = studentName;
+  }
+
+  // Show join code
+  const joinCodeEl = document.getElementById('classify-gallery-join-code');
+  if (joinCodeEl) joinCodeEl.textContent = `코드: ${currentBoardCode}`;
+
+  // Parse initial sub-route from hash (for direct URL access / refresh)
+  const initParsed = clParseSubRoute(location.hash.slice(1));
+  CL.currentView = initParsed?.view || 'tree';
+  CL.currentPage = initParsed?.wsId ? 'workspace' : 'overview';
+  CL.workspaceId = initParsed?.wsId || '';
+  CL.searchQuery = '';
+  CL.folderParentId = initParsed?.folderId || '';
+  const searchInput = document.getElementById('cl-search-gallery');
+  if (searchInput) searchInput.value = '';
+
+  // Register as member in board
+  try {
+    const memberData = { name: studentName };
+    const settings = currentBoard?.settings || {};
+    if (settings.groupMode === 'team') {
+      const savedGroupId = localStorage.getItem(`easyup_group_${currentBoardCode}`);
+      if (savedGroupId) memberData.groupId = savedGroupId;
+    }
+    await updateDoc(doc(db, 'boards', currentBoardCode), {
+      [`members.${deviceId}`]: memberData
+    });
+  } catch (e) { console.error('Member registration failed:', e); }
+
+  // Populate group dropdown (team mode)
+  clPopulateGroupSelect();
+
+  showView('classify-gallery-view');
+  location.hash = `classify/${currentBoardCode}`;
+
+  if (unsubscribeClassifyGallery) unsubscribeClassifyGallery();
+  unsubscribeClassifyGallery = clSubscribe('cl-gallery-container', false);
+}
+
+// ── Teacher Board View ──
+function showClassifyBoard(code) {
+  document.getElementById('classify-board-title-display').textContent = currentBoard.title;
+  document.getElementById('classify-board-code-badge').textContent = `코드: ${code}`;
+  setTextVisibility('classify-board-desc-display', currentBoard.description);
+  clUpdatePeekButton();
+
+  // Parse initial sub-route from hash
+  const initParsed = clParseSubRoute(location.hash.slice(1));
+  CL.currentView = initParsed?.view || 'tree';
+  CL.currentPage = initParsed?.wsId ? 'workspace' : 'overview';
+  CL.workspaceId = initParsed?.wsId || '';
+  CL.searchQuery = '';
+  CL.folderParentId = initParsed?.folderId || '';
+  const searchInput = document.getElementById('cl-search-board');
+  if (searchInput) searchInput.value = '';
+
+  showView('classify-board-view');
+
+  if (unsubscribeClassifyBoard) unsubscribeClassifyBoard();
+  unsubscribeClassifyBoard = clSubscribe('cl-board-container', true);
+}
+
+// ── View Toggle ──
+window.clSwitchView = function(view, containerId) {
+  CL.currentView = view;
+  if (view === 'folder') CL.folderParentId = '';
+  const parent = document.getElementById(containerId)?.closest('.view');
+  if (parent) {
+    parent.querySelectorAll('.cl-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  }
+  const isBoard = containerId === 'cl-board-container';
+  clBuildTree();
+  clRenderCurrentView(containerId);
+  location.hash = clBuildHash(isBoard);
+};
+
+// ── Search ──
+window.clSearch = function(value, containerId) {
+  CL.searchQuery = value;
+  clBuildTree();
+  clRenderCurrentView(containerId);
+};
+
+// ══════════════════════════════════════
+//  CLASSIFY: TREE VIEW
+// ══════════════════════════════════════
+function clRenderTreeView(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const isTeacher = CL.isTeacher;
+  const canAdd = clIsMyWorkspace() && (!isBoardClosed() || isTeacher);
+
+  // Root node: always board title (과제명)
+  const rootTitle = currentBoard?.title || '';
+  const totalCount = CL.cards.filter(c => c.cardType !== 'category').length;
+
+  let html = '<div class="cl-tree-canvas"><div class="cl-tree-root">';
+  // Root node
+  html += `<div class="cl-tree-node" data-id="__root__">
+    <div class="cl-node-box cl-root-node" data-card-id="__root__">
+      <div class="cl-node-header">
+        <span class="cl-node-title">${escapeHtml(rootTitle)}</span>
+      </div>
+      <div class="cl-node-meta"><span class="cl-node-badge">${totalCount}개 항목</span></div>
+      ${canAdd ? `<button class="cl-add-btn" data-parent="" data-container="${containerId}" title="항목 추가">+</button>` : ''}
+    </div>
+    <div class="cl-tree-children">`;
+  html += CL.tree.map(node => clRenderTreeNode(node, CL.searchQuery, isTeacher, containerId)).join('');
+  html += '</div></div>';
+  html += '</div></div>';
+  container.innerHTML = html;
+
+  // Draw SVG lines after render
+  // Draw lines after layout, and redraw after images load
+  requestAnimationFrame(() => {
+    clDrawTreeLines(containerId);
+    // Debounced redraw after images load
+    let redrawTimer = null;
+    const imgs = container.querySelectorAll('img');
+    imgs.forEach(img => {
+      if (!img.complete) img.addEventListener('load', () => {
+        clearTimeout(redrawTimer);
+        redrawTimer = setTimeout(() => clDrawTreeLines(containerId), 50);
+      }, { once: true });
+    });
+  });
+}
+
+function clRenderTreeNode(node, query, isTeacher, containerId) {
+  const isCategory = node.cardType === 'category';
+  const isMine = node.deviceId === deviceId;
+  const canEdit = clIsMyWorkspace() && (isTeacher || isMine);
+  const canAdd = clIsMyWorkspace() && (!isBoardClosed() || isTeacher);
+  const color = node.color || (isCategory ? CL_COLORS[Math.abs(hashStr(node.id)) % CL_COLORS.length] : '#6B7280');
+  const starCount = (node.stars || []).length;
+  const isStarred = (node.stars || []).includes(deviceId);
+  const time = node.createdAt ? formatDateShort(node.createdAt.toDate()) : '';
+
+  let titleMatch = escapeHtml(node.title || '');
+  if (query) {
+    const re = new RegExp(`(${escapeRegex(query)})`, 'gi');
+    titleMatch = titleMatch.replace(re, '<mark>$1</mark>');
+  }
+
+  const imgHtml = node.imageUrl
+    ? `<div class="cl-node-image"><img src="${escapeHtml(node.imageUrl)}" alt="" loading="lazy"></div>`
+    : '';
+
+  const descHtml = node.content
+    ? `<div class="cl-node-desc">${escapeHtml(truncate(node.content, 80))}</div>`
+    : '';
+
+  const childrenHtml = (node.children && node.children.length > 0)
+    ? `<div class="cl-tree-children">${node.children.map(c => clRenderTreeNode(c, query, isTeacher, containerId)).join('')}</div>`
+    : '';
+
+  // Add button only on category nodes
+  const addBtnHtml = (isCategory && canAdd) ? `<button class="cl-add-btn" data-parent="${escapeHtml(node.id)}" data-container="${containerId}" title="항목 추가">+</button>` : '';
+
+  return `
+    <div class="cl-tree-node" data-id="${escapeHtml(node.id)}">
+      <div class="cl-node-box ${isCategory ? 'cl-category-box' : 'cl-entry-box'} ${isMine ? 'cl-node-mine' : ''}"
+           data-id="${escapeHtml(node.id)}" data-type="${node.cardType}"
+           style="border-left-color:${color}"
+           draggable="${canEdit ? 'true' : 'false'}">
+        <div class="cl-node-header">
+          <span class="cl-node-icon">${isCategory ? '📁' : '📄'}</span>
+          <span class="cl-node-title">${titleMatch}</span>
+          ${canEdit && !isBoardClosed() ? `<button class="cl-node-menu-btn" data-id="${escapeHtml(node.id)}" title="메뉴">⋮</button>` : ''}
+        </div>
+        ${imgHtml}
+        ${descHtml}
+        <div class="cl-node-meta">
+          <span class="cl-node-author">${escapeHtml(node.name || '')}</span>
+          <span class="cl-node-time">${time}</span>
+          <button class="cl-star-btn ${isStarred ? 'cl-starred' : ''}" data-id="${escapeHtml(node.id)}" title="추천">
+            ${isStarred ? '★' : '☆'} ${starCount > 0 ? starCount : ''}
+          </button>
+        </div>
+        ${addBtnHtml}
+      </div>
+      ${childrenHtml}
+    </div>`;
+}
+
+function hashStr(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Draw SVG curved connection lines between tree nodes */
+function clDrawTreeLines(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  // Remove old SVGs
+  container.querySelectorAll('.cl-tree-svg').forEach(s => s.remove());
+
+  const nodes = container.querySelectorAll('.cl-tree-node');
+  nodes.forEach(node => {
+    const box = node.querySelector(':scope > .cl-node-box');
+    const childrenContainer = node.querySelector(':scope > .cl-tree-children');
+    if (!box || !childrenContainer) return;
+
+    const childNodes = childrenContainer.querySelectorAll(':scope > .cl-tree-node > .cl-node-box');
+    if (childNodes.length === 0) return;
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.classList.add('cl-tree-svg');
+    svg.style.position = 'absolute';
+    svg.style.top = '0';
+    svg.style.left = '0';
+    svg.style.width = node.scrollWidth + 'px';
+    svg.style.height = node.scrollHeight + 'px';
+    svg.style.pointerEvents = 'none';
+    svg.style.overflow = 'visible';
+    svg.style.zIndex = '0';
+    node.insertBefore(svg, childrenContainer);
+
+    const nodeRect = node.getBoundingClientRect();
+    const boxRect = box.getBoundingClientRect();
+    // Horizontal layout: parent right edge → child left edge
+    const pX = boxRect.right - nodeRect.left;
+    const pY = boxRect.top + boxRect.height / 2 - nodeRect.top;
+
+    childNodes.forEach(childBox => {
+      const childRect = childBox.getBoundingClientRect();
+      const cX = childRect.left - nodeRect.left;
+      const cY = childRect.top + childRect.height / 2 - nodeRect.top;
+
+      const midX = pX + (cX - pX) * 0.5;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${pX} ${pY} C ${midX} ${pY}, ${midX} ${cY}, ${cX} ${cY}`);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', '#B0BEC5');
+      path.setAttribute('stroke-width', '2');
+      path.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(path);
+    });
+  });
+}
+
+// ══════════════════════════════════════
+//  CLASSIFY: FOLDER VIEW
+// ══════════════════════════════════════
+function clRenderFolderView(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const isTeacher = CL.isTeacher;
+
+  // Breadcrumb
+  let breadcrumb = clBuildBreadcrumb();
+
+  // Get children of current folder
+  const currentChildren = CL.cards.filter(c => (c.parentId || '') === CL.folderParentId);
+  currentChildren.sort((a, b) => {
+    // Categories first, then entries
+    if (a.cardType !== b.cardType) return a.cardType === 'category' ? -1 : 1;
+    return (a.order || 0) - (b.order || 0);
+  });
+
+  let html = `<div class="cl-folder-view">`;
+  html += `<div class="cl-breadcrumb">${breadcrumb}</div>`;
+
+  html += '<div class="cl-folder-grid">';
+  // Navigation card: go up (only when inside a subfolder)
+  if (CL.folderParentId) {
+    const parentCard = CL.cardMap[CL.folderParentId];
+    const grandParentId = parentCard?.parentId || '';
+    html += `<div class="cl-folder-card cl-folder-nav" data-nav-parent="${escapeHtml(grandParentId)}">
+      <div class="cl-folder-card-header"><span class="cl-folder-icon">⬆️</span><span class="cl-folder-title">상위 폴더로</span></div>
+    </div>`;
+  }
+
+  if (currentChildren.length === 0) {
+    html += '<div class="empty-state" style="padding:30px;grid-column:1/-1"><p>이 폴더는 비어 있습니다.</p></div>';
+  } else {
+    currentChildren.forEach(card => {
+      const isCategory = card.cardType === 'category';
+      const isMine = card.deviceId === deviceId;
+      const canEdit = clIsMyWorkspace() && (isTeacher || isMine);
+      const childCount = CL.allCards.filter(c => c.parentId === card.id && c.cardType !== 'category').length;
+      const color = card.color || (isCategory ? CL_COLORS[Math.abs(hashStr(card.id)) % CL_COLORS.length] : '#6B7280');
+      const starCount = (card.stars || []).length;
+      const isStarred = (card.stars || []).includes(deviceId);
+      const time = card.createdAt ? formatDateShort(card.createdAt.toDate()) : '';
+
+      html += `
+        <div class="cl-folder-card ${isCategory ? 'cl-folder-category' : 'cl-folder-entry'} ${isMine ? 'cl-node-mine' : ''}"
+             data-id="${escapeHtml(card.id)}" data-type="${card.cardType}"
+             style="border-top-color:${color}">
+          <div class="cl-folder-card-header">
+            <span class="cl-folder-icon">${isCategory ? '📁' : '📄'}</span>
+            <span class="cl-folder-title">${escapeHtml(card.title || '')}</span>
+            ${canEdit && !isBoardClosed() ? `<span class="cl-folder-actions">
+              <button class="cl-folder-edit-btn" data-id="${escapeHtml(card.id)}" title="수정">✏️</button>
+              <button class="cl-folder-del-btn" data-id="${escapeHtml(card.id)}" title="삭제">🗑️</button>
+            </span>` : ''}
+          </div>
+          ${card.imageUrl ? `<div class="cl-folder-img"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
+          ${card.content ? `<div class="cl-folder-desc">${escapeHtml(truncate(card.content, 60))}</div>` : ''}
+          <div class="cl-folder-meta">
+            <span>${escapeHtml(card.name || '')} · ${time}</span>
+            <span>
+              ${isCategory ? `<span class="cl-child-count">${childCount}개</span>` : ''}
+              <button class="cl-star-btn ${isStarred ? 'cl-starred' : ''}" data-id="${escapeHtml(card.id)}">
+                ${isStarred ? '★' : '☆'} ${starCount > 0 ? starCount : ''}
+              </button>
+            </span>
+          </div>
+        </div>`;
+    });
+  }
+  html += '</div>'; // cl-folder-grid
+  html += '</div>'; // cl-folder-view
+  container.innerHTML = html;
+}
+
+function clBuildBreadcrumb() {
+  const parts = [];
+  let pid = CL.folderParentId;
+  while (pid && CL.cardMap[pid]) {
+    parts.unshift(CL.cardMap[pid]);
+    pid = CL.cardMap[pid].parentId || '';
+  }
+
+  let html = `<button class="cl-breadcrumb-item cl-breadcrumb-root" data-parent="">🏠 전체</button>`;
+  parts.forEach(p => {
+    html += `<span class="cl-breadcrumb-sep">›</span>`;
+    html += `<button class="cl-breadcrumb-item" data-parent="${escapeHtml(p.id)}">${escapeHtml(p.title || '')}</button>`;
+  });
+  return html;
+}
+
+// ══════════════════════════════════════
+//  CLASSIFY: CARD CRUD
+// ══════════════════════════════════════
+/** Open editor modal for new or existing card */
+window.clOpenCardEditor = function(cardId, parentId, cardType) {
+  if (!clIsMyWorkspace()) { toast('다른 사람의 워크스페이스입니다.'); return; }
+  if (!CL.isTeacher && currentBoard?.members?.[deviceId]?.muted) { toast('쓰기가 중지되었습니다.'); return; }
+  if (isBoardClosed() && !CL.isTeacher) { toast('마감된 보드입니다.'); return; }
+  CL.editingCardId = cardId || null;
+  CL.addParentId = parentId || '';
+  CL.addType = cardType || 'entry';
+
+  const modal = document.getElementById('classify-card-modal');
+  const heading = document.getElementById('cl-editor-heading');
+  const titleInput = document.getElementById('cl-editor-title');
+  const contentInput = document.getElementById('cl-editor-content');
+  const imgPreview = document.getElementById('cl-editor-img-preview');
+  const dropzone = document.getElementById('cl-editor-dropzone');
+
+  if (cardId && CL.cardMap[cardId]) {
+    const card = CL.cardMap[cardId];
+    heading.textContent = card.cardType === 'category' ? '분류기준 편집' : '카드 편집';
+    titleInput.value = card.title || '';
+    contentInput.value = card.content || '';
+    if (card.imageUrl) {
+      imgPreview.innerHTML = `<img src="${escapeHtml(card.imageUrl)}" alt=""><button class="cl-img-remove" onclick="clRemoveEditorImage()">✕</button>`;
+      imgPreview.style.display = 'block';
+      dropzone.style.display = 'none';
+    } else {
+      imgPreview.innerHTML = '';
+      imgPreview.style.display = 'none';
+      dropzone.style.display = 'block';
+    }
+    CL.editorImageUrl = card.imageUrl || '';
+    CL.editorImagePath = card.imagePath || '';
+  } else {
+    heading.textContent = cardType === 'category' ? '분류기준 추가' : '카드 추가';
+    titleInput.value = '';
+    contentInput.value = '';
+    imgPreview.innerHTML = '';
+    imgPreview.style.display = 'none';
+    dropzone.style.display = 'block';
+    CL.editorImageUrl = '';
+    CL.editorImagePath = '';
+  }
+
+  // Reset file input
+  const fileInput = document.getElementById('cl-editor-file');
+  if (fileInput) fileInput.value = '';
+  CL.editorNewFile = null;
+
+  // Hide image/content for category (title only)
+  const isCategory = cardId ? CL.cardMap[cardId]?.cardType === 'category' : CL.addType === 'category';
+  document.getElementById('cl-editor-image-group').style.display = isCategory ? 'none' : '';
+  document.getElementById('cl-editor-content-group').style.display = isCategory ? 'none' : '';
+
+  modal.style.display = 'flex';
+  openModalHistory();
+  setTimeout(() => titleInput.focus(), 100);
+};
+
+window.clRemoveEditorImage = function() {
+  CL.editorImageUrl = '';
+  CL.editorImagePath = '';
+  CL.editorNewFile = null;
+  document.getElementById('cl-editor-img-preview').innerHTML = '';
+  document.getElementById('cl-editor-img-preview').style.display = 'none';
+  document.getElementById('cl-editor-dropzone').style.display = 'block';
+  const fileInput = document.getElementById('cl-editor-file');
+  if (fileInput) fileInput.value = '';
+};
+
+window.clCloseCardEditor = function() { closeModal('classify-card-modal'); };
+
+/** Handle image file selection in editor */
+window.clEditorFileChange = function(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { toast('이미지 파일만 업로드 가능합니다'); return; }
+  if (file.size > 10 * 1024 * 1024) { toast('10MB 이하 이미지만 가능합니다'); return; }
+  CL.editorNewFile = file;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const preview = document.getElementById('cl-editor-img-preview');
+    preview.innerHTML = `<img src="${e.target.result}" alt=""><button class="cl-img-remove" onclick="clRemoveEditorImage()">✕</button>`;
+    preview.style.display = 'block';
+    document.getElementById('cl-editor-dropzone').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+};
+
+/** Upload image to Firebase Storage */
+async function clUploadImage(file) {
+  const path = `boards/${currentBoardCode}/${Date.now()}_${file.name}`;
+  const storageRef = ref(storage, path);
+  const snap = await uploadBytesResumable(storageRef, file);
+  const url = await getDownloadURL(snap.ref);
+  return { url, path };
+}
+
+/** Save card from editor modal */
+window.clSaveCard = async function() {
+  const title = document.getElementById('cl-editor-title').value.trim();
+  if (!title) { toast('제목을 입력하세요'); return; }
+  const content = document.getElementById('cl-editor-content').value.trim();
+
+  const saveBtn = document.getElementById('cl-editor-save');
+  saveBtn.disabled = true;
+  saveBtn.textContent = '저장 중...';
+
+  try {
+    let imageUrl = CL.editorImageUrl || '';
+    let imagePath = CL.editorImagePath || '';
+
+    // Upload new image if selected
+    if (CL.editorNewFile) {
+      const result = await clUploadImage(CL.editorNewFile);
+      imageUrl = result.url;
+      imagePath = result.path;
+    }
+
+    if (CL.editingCardId) {
+      // Update existing card
+      await updateDoc(doc(db, 'boards', currentBoardCode, 'submissions', CL.editingCardId), {
+        title, content, imageUrl, imagePath
+      });
+      toast('수정되었습니다');
+    } else {
+      // Create new card
+      const subId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const siblings = CL.allCards.filter(c => (c.parentId || '') === CL.addParentId);
+      const maxOrder = siblings.reduce((max, c) => Math.max(max, c.order || 0), 0);
+
+      await setDoc(doc(db, 'boards', currentBoardCode, 'submissions', subId), {
+        cardType: CL.addType || 'entry',
+        parentId: CL.addParentId || '',
+        title,
+        content,
+        imageUrl,
+        imagePath,
+        order: maxOrder + 1000,
+        color: '',
+        stars: [],
+        name: CL.isTeacher ? (currentUser?.displayName || currentUser?.email || '교사') : studentName,
+        deviceId: CL.isTeacher ? 'teacher' : deviceId,
+        workspaceId: CL.workspaceId || '',
+        boardCode: currentBoardCode,
+        createdAt: serverTimestamp()
+      });
+      toast('추가되었습니다!');
+    }
+    clCloseCardEditor();
+  } catch (e) {
+    console.error(e);
+    toast('오류: ' + e.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = '저장';
+  }
+};
+
+/** Delete a card and all descendants */
+function clGetDescendantIds(cardId) {
+  const ids = [];
+  function walk(pid) {
+    CL.allCards.filter(c => c.parentId === pid).forEach(c => {
+      ids.push(c.id);
+      walk(c.id);
+    });
+  }
+  walk(cardId);
+  return ids;
+}
+
+async function clDeleteCard(cardId) {
+  const card = CL.cardMap[cardId];
+  if (!card) return;
+  const preview = truncate(card.title || '(제목 없음)', 30);
+  const hasChildren = CL.allCards.some(c => c.parentId === cardId);
+  const msg = hasChildren
+    ? `"${preview}" 및 하위 항목을 모두 삭제하시겠습니까?`
+    : `"${preview}"을(를) 삭제하시겠습니까?`;
+  if (!await showConfirm(msg)) return;
+
+  // Collect all descendant IDs
+  const toDelete = [cardId];
+  function collectChildren(pid) {
+    CL.allCards.filter(c => c.parentId === pid).forEach(c => {
+      toDelete.push(c.id);
+      collectChildren(c.id);
+    });
+  }
+  collectChildren(cardId);
+
+  try {
+    await Promise.all(toDelete.map(id => {
+      const c = CL.cardMap[id];
+      if (c?.imagePath) deleteObject(ref(storage, c.imagePath)).catch(() => {});
+      return deleteDoc(doc(db, 'boards', currentBoardCode, 'submissions', id));
+    }));
+    toast('삭제됨');
+  } catch (e) { toast('삭제 실패'); }
+}
+
+/** Move a card to a new parent */
+async function clMoveCard(cardId, newParentId) {
+  if (cardId === newParentId) return;
+  // Prevent moving to own descendant
+  let pid = newParentId;
+  while (pid) {
+    if (pid === cardId) { toast('하위 항목으로 이동할 수 없습니다'); return; }
+    pid = CL.cardMap[pid]?.parentId || '';
+  }
+  const siblings = CL.allCards.filter(c => (c.parentId || '') === newParentId);
+  const maxOrder = siblings.reduce((max, c) => Math.max(max, c.order || 0), 0);
+  try {
+    await updateDoc(doc(db, 'boards', currentBoardCode, 'submissions', cardId), {
+      parentId: newParentId,
+      order: maxOrder + 1000
+    });
+    toast('이동됨');
+  } catch (e) { toast('이동 실패'); }
+}
+
+/** Toggle star on a card */
+async function clToggleStar(cardId) {
+  const subRef = doc(db, 'boards', currentBoardCode, 'submissions', cardId);
+  try {
+    const subDoc = await getDoc(subRef);
+    if (!subDoc.exists()) return;
+    const data = subDoc.data();
+    const stars = data.stars || [];
+    const isStarred = stars.includes(deviceId);
+    await updateDoc(subRef, {
+      stars: isStarred ? stars.filter(id => id !== deviceId) : [...stars, deviceId]
+    });
+  } catch (e) { console.error(e); toast('오류 발생'); }
+}
+
+/** Set card color */
+async function clSetColor(cardId, color) {
+  try {
+    await updateDoc(doc(db, 'boards', currentBoardCode, 'submissions', cardId), { color });
+    toast('색상 변경됨');
+  } catch (e) { toast('색상 변경 실패'); }
+}
+
+// ══════════════════════════════════════
+//  CLASSIFY: CONTEXT MENU & COLOR PICKER
+// ══════════════════════════════════════
+window.clShowContextMenu = function(cardId, x, y) {
+  CL.contextCardId = cardId;
+  const card = CL.cardMap[cardId];
+  if (!card) return;
+  const isCategory = card.cardType === 'category';
+  const isMine = card.deviceId === deviceId;
+  const canEdit = CL.isTeacher || isMine;
+  if (!canEdit || isBoardClosed()) return;
+
+  const menu = document.getElementById('cl-context-menu');
+  let html = '';
+  html += `<button class="cl-ctx-item" data-action="edit">✏️ 수정</button>`;
+  if (isCategory) {
+    html += `<button class="cl-ctx-item" data-action="add-category">📁 하위 분류기준 추가</button>`;
+    html += `<button class="cl-ctx-item" data-action="add-entry">📝 카드 추가</button>`;
+  }
+  html += `<button class="cl-ctx-item" data-action="color">🎨 색상 변경</button>`;
+  html += `<button class="cl-ctx-item" data-action="move">📦 이동</button>`;
+  html += `<button class="cl-ctx-item cl-ctx-danger" data-action="delete">🗑 삭제</button>`;
+  menu.innerHTML = html;
+
+  // Position
+  menu.style.display = 'block';
+  const menuW = menu.offsetWidth;
+  const menuH = menu.offsetHeight;
+  const winW = window.innerWidth;
+  const winH = window.innerHeight;
+  menu.style.left = (x + menuW > winW ? winW - menuW - 8 : x) + 'px';
+  menu.style.top = (y + menuH > winH ? winH - menuH - 8 : y) + 'px';
+};
+
+window.clHideContextMenu = function() {
+  document.getElementById('cl-context-menu').style.display = 'none';
+  CL.contextCardId = null;
+};
+
+window.clShowColorPicker = function(cardId, x, y) {
+  CL.contextCardId = cardId;
+  const picker = document.getElementById('cl-color-picker');
+  picker.innerHTML = CL_COLORS.map(c =>
+    `<button class="cl-color-dot" style="background:${c}" data-color="${c}"></button>`
+  ).join('') + `<button class="cl-color-dot cl-color-reset" data-color="" title="기본">✕</button>`;
+  picker.style.display = 'flex';
+  picker.style.left = x + 'px';
+  picker.style.top = y + 'px';
+};
+
+window.clHideColorPicker = function() {
+  document.getElementById('cl-color-picker').style.display = 'none';
+};
+
+window.clShowMoveDialog = function(cardId) {
+  const card = CL.cardMap[cardId];
+  if (!card) return;
+  // Show prompt with category list
+  const categories = CL.allCards.filter(c => c.cardType === 'category' && c.id !== cardId);
+  if (categories.length === 0) { toast('이동할 카테고리가 없습니다'); return; }
+
+  const modal = document.getElementById('cl-move-modal');
+  const list = document.getElementById('cl-move-list');
+  list.innerHTML = `<button class="cl-move-item" data-parent="">🏠 최상위 (루트)</button>` +
+    categories.map(c => `<button class="cl-move-item" data-parent="${escapeHtml(c.id)}">${escapeHtml(c.title)}</button>`).join('');
+  CL.moveCardId = cardId;
+  modal.style.display = 'flex';
+  openModalHistory();
+};
+
+window.clCloseMoveModal = function() { closeModal('cl-move-modal'); };
+
+// ── Members Management Modal ──
+window.clOpenMembersModal = function() {
+  clRenderMembersList();
+  document.getElementById('cl-members-modal').style.display = 'flex';
+  openModalHistory();
+};
+
+window.clCloseMembersModal = function() { closeModal('cl-members-modal'); };
+
+// ── 서로보기 토글 (공통: 과제/질문판/분류 모두 사용) ──
+window.togglePeekFromBoard = async function() {
+  const newPeek = currentBoard?.allowPeek === false ? true : false;
+  try {
+    await updateDoc(doc(db, 'boards', currentBoardCode), { allowPeek: newPeek });
+    currentBoard.allowPeek = newPeek;
+    updateAllPeekButtons();
+    toast(newPeek ? '서로보기 허용됨' : '서로보기 차단됨');
+  } catch (e) { toast('변경 실패'); }
+};
+window.clTogglePeekFromBoard = window.togglePeekFromBoard;
+
+function updatePeekToggleBtn(btnId) {
+  const btn = document.getElementById(btnId);
+  if (btn) btn.textContent = currentBoard?.allowPeek === false ? '👁 서로보기 허용' : '🚫 서로보기 차단';
+}
+
+function updateAllPeekButtons() {
+  updatePeekToggleBtn('cl-peek-toggle-btn');
+  updatePeekToggleBtn('board-peek-toggle');
+  updatePeekToggleBtn('inquiry-peek-toggle');
+}
+
+const clUpdatePeekButton = updateAllPeekButtons;
+
+function clRenderMembersList() {
+  const container = document.getElementById('cl-members-list');
+  if (!container) return;
+  const members = currentBoard?.members || {};
+  const settings = currentBoard?.settings || {};
+  const isTeam = settings.groupMode === 'team';
+  const groups = currentBoard?.groups || {};
+  const entries = Object.entries(members);
+
+  if (entries.length === 0) {
+    container.innerHTML = '<p style="text-align:center;color:var(--text-light);padding:20px">참여자가 없습니다.</p>';
+    return;
+  }
+
+  let html = '<table class="cl-members-table"><thead><tr><th>이름</th>';
+  if (isTeam) html += '<th>모둠</th>';
+  html += '<th>쓰기</th></tr></thead><tbody>';
+
+  entries.forEach(([dId, m]) => {
+    const isMuted = m.muted === true;
+    const groupOptions = isTeam ? Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([gId, g]) => `<option value="${gId}" ${m.groupId === gId ? 'selected' : ''}>${g.name}</option>`).join('') : '';
+
+    html += `<tr data-device-id="${escapeHtml(dId)}">
+      <td><input type="text" class="cl-member-name-input" value="${escapeHtml(m.name || '')}" data-did="${escapeHtml(dId)}" style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;"></td>
+      ${isTeam ? `<td><select class="cl-member-group-select" data-did="${escapeHtml(dId)}" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;">${groupOptions}</select></td>` : ''}
+      <td style="text-align:center"><button type="button" class="btn btn-sm ${isMuted ? 'btn-danger-light' : 'btn-secondary'} cl-member-mute-btn" data-did="${escapeHtml(dId)}" data-muted="${isMuted}">${isMuted ? '🔇 중지됨' : '✏️ 허용'}</button></td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  html += '<button class="btn btn-primary btn-full" style="margin-top:16px" id="cl-members-save-all">저장</button>';
+  container.innerHTML = html;
+
+  // Mute toggle (UI only, saved on submit)
+  container.querySelectorAll('.cl-member-mute-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const isMuted = btn.dataset.muted === 'true';
+      btn.dataset.muted = isMuted ? 'false' : 'true';
+      btn.textContent = isMuted ? '✏️ 허용' : '🔇 중지됨';
+      btn.className = `btn btn-sm ${isMuted ? 'btn-secondary' : 'btn-danger-light'} cl-member-mute-btn`;
+    });
+  });
+
+  // Save all
+  document.getElementById('cl-members-save-all').addEventListener('click', async () => {
+    const saveBtn = document.getElementById('cl-members-save-all');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '저장 중...';
+
+    try {
+      const boardUpdate = {};
+      const nameChanges = []; // [{dId, newName}]
+
+      container.querySelectorAll('tr[data-device-id]').forEach(row => {
+        const dId = row.dataset.deviceId;
+        const nameInput = row.querySelector('.cl-member-name-input');
+        const groupSelect = row.querySelector('.cl-member-group-select');
+        const muteBtn = row.querySelector('.cl-member-mute-btn');
+
+        const newName = nameInput.value.trim() || members[dId]?.name || '';
+        const memberData = { name: newName, muted: muteBtn.dataset.muted === 'true' };
+        if (groupSelect) memberData.groupId = groupSelect.value;
+        boardUpdate[`members.${dId}`] = memberData;
+
+        // Track name changes for submission updates
+        if (newName !== (members[dId]?.name || '')) {
+          nameChanges.push({ dId, newName });
+        }
+      });
+
+      await updateDoc(doc(db, 'boards', currentBoardCode), boardUpdate);
+
+      // Update names in submissions
+      if (nameChanges.length > 0) {
+        const subs = await getDocs(collection(db, 'boards', currentBoardCode, 'submissions'));
+        const updates = [];
+        nameChanges.forEach(({ dId, newName }) => {
+          subs.docs.filter(d => d.data().deviceId === dId).forEach(d => {
+            updates.push(updateDoc(d.ref, { name: newName }));
+          });
+        });
+        await Promise.all(updates);
+      }
+
+      toast('저장됨');
+      clCloseMembersModal();
+    } catch (e) {
+      console.error(e);
+      toast('저장 실패');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '저장';
+    }
+  });
+}
+
+// ══════════════════════════════════════
+//  CLASSIFY: EVENT DELEGATION
+// ══════════════════════════════════════
+
+/** Setup event delegation for a classify container */
+function clSetupEvents(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  container.addEventListener('click', (e) => {
+    // Overview card click → enter workspace
+    const overviewCard = e.target.closest('.cl-overview-card');
+    if (overviewCard && CL.currentPage === 'overview') {
+      e.stopPropagation();
+      const wsId = overviewCard.dataset.wsId;
+      if (wsId) clEnterWorkspace(wsId, containerId);
+      return;
+    }
+
+    // Add button (+ on tree nodes)
+    const addBtn = e.target.closest('.cl-add-btn');
+    if (addBtn) {
+      e.stopPropagation();
+      const parentId = addBtn.dataset.parent || '';
+      // Show add popup at cursor position
+      clShowAddPopupAt(e.clientX, e.clientY, parentId, containerId);
+      return;
+    }
+
+    // Star button
+    const starBtn = e.target.closest('.cl-star-btn');
+    if (starBtn) { e.stopPropagation(); clToggleStar(starBtn.dataset.id); return; }
+
+    // Menu button (three dots)
+    const menuBtn = e.target.closest('.cl-node-menu-btn');
+    if (menuBtn) {
+      e.stopPropagation();
+      e.preventDefault();
+      const rect = menuBtn.getBoundingClientRect();
+      clShowContextMenu(menuBtn.dataset.id, rect.right, rect.bottom);
+      return;
+    }
+
+    // Folder view: edit button
+    const editBtn = e.target.closest('.cl-folder-edit-btn');
+    if (editBtn) {
+      e.stopPropagation();
+      const card = CL.cardMap[editBtn.dataset.id];
+      if (card) clOpenCardEditor(card.id);
+      return;
+    }
+
+    // Folder view: delete button
+    const delBtn = e.target.closest('.cl-folder-del-btn');
+    if (delBtn) {
+      e.stopPropagation();
+      clDeleteCard(delBtn.dataset.id);
+      return;
+    }
+
+    // Folder navigation card (go up / back to overview)
+    const navCard = e.target.closest('.cl-folder-nav');
+    if (navCard && CL.currentView === 'folder') {
+      e.stopPropagation();
+      if (navCard.dataset.navAction === 'back-to-overview') {
+        clBackToOverview(containerId);
+      } else {
+        CL.folderParentId = navCard.dataset.navParent || '';
+        const isBoard = containerId === 'cl-board-container';
+        clBuildTree();
+        clRenderCurrentView(containerId);
+        location.hash = clBuildHash(isBoard);
+      }
+      return;
+    }
+
+    // Folder card click → navigate into folder
+    const folderCard = e.target.closest('.cl-folder-category');
+    if (folderCard && CL.currentView === 'folder') {
+      e.stopPropagation();
+      CL.folderParentId = folderCard.dataset.id;
+      const isBoard = containerId === 'cl-board-container';
+      clBuildTree();
+      clRenderCurrentView(containerId);
+      location.hash = clBuildHash(isBoard);
+      return;
+    }
+
+    // Breadcrumb navigation
+    const breadcrumbItem = e.target.closest('.cl-breadcrumb-item');
+    if (breadcrumbItem) {
+      e.stopPropagation();
+      CL.folderParentId = breadcrumbItem.dataset.parent || '';
+      const isBoard = containerId === 'cl-board-container';
+      clBuildTree();
+      clRenderCurrentView(containerId);
+      location.hash = clBuildHash(isBoard);
+      return;
+    }
+  });
+
+  // Right-click context menu on node boxes
+  container.addEventListener('contextmenu', (e) => {
+    const box = e.target.closest('.cl-node-box, .cl-folder-card');
+    if (box && box.dataset.id) {
+      const card = CL.cardMap[box.dataset.id];
+      if (!card) return;
+      const isMine = card.deviceId === deviceId;
+      if (CL.isTeacher || isMine) {
+        e.preventDefault();
+        clShowContextMenu(box.dataset.id, e.clientX, e.clientY);
+      }
+    }
+  });
+
+  // ── Drag & Drop (tree view) ──
+  container.addEventListener('dragstart', (e) => {
+    const box = e.target.closest('.cl-node-box[draggable="true"]');
+    if (!box || box.dataset.cardId === '__root__') { e.preventDefault(); return; }
+    const cardId = box.dataset.id;
+    if (!cardId) { e.preventDefault(); return; }
+    CL.dragCardId = cardId;
+    e.dataTransfer.setData('text/plain', cardId);
+    e.dataTransfer.effectAllowed = 'move';
+    setTimeout(() => box.classList.add('cl-dragging'), 0);
+  });
+
+  container.addEventListener('dragend', (e) => {
+    const box = e.target.closest('.cl-node-box');
+    if (box) box.classList.remove('cl-dragging');
+    container.querySelectorAll('.cl-drag-over').forEach(el => el.classList.remove('cl-drag-over'));
+    CL.dragCardId = null;
+  });
+
+  container.addEventListener('dragover', (e) => {
+    if (!CL.dragCardId) return;
+    const box = e.target.closest('.cl-node-box');
+    if (!box) return;
+    const targetId = box.dataset.id || box.dataset.cardId;
+    if (!targetId || targetId === CL.dragCardId) return;
+    // Only allow drop on root or category nodes
+    if (targetId !== '__root__') {
+      const targetCard = CL.cardMap[targetId];
+      if (!targetCard || targetCard.cardType !== 'category') return;
+      const descendants = clGetDescendantIds(CL.dragCardId);
+      if (descendants.includes(targetId)) return;
+    }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    box.classList.add('cl-drag-over');
+  });
+
+  container.addEventListener('dragleave', (e) => {
+    const box = e.target.closest('.cl-node-box');
+    if (box) box.classList.remove('cl-drag-over');
+  });
+
+  container.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    if (!CL.dragCardId) return;
+    const box = e.target.closest('.cl-node-box');
+    if (!box) return;
+    const targetId = box.dataset.id || box.dataset.cardId;
+    if (!targetId || targetId === CL.dragCardId) return;
+    // Only allow drop on root or category nodes
+    if (targetId !== '__root__') {
+      const targetCard = CL.cardMap[targetId];
+      if (!targetCard || targetCard.cardType !== 'category') return;
+    }
+    const newParentId = targetId === '__root__' ? '' : targetId;
+    container.querySelectorAll('.cl-drag-over').forEach(el => el.classList.remove('cl-drag-over'));
+    await clMoveCard(CL.dragCardId, newParentId);
+    CL.dragCardId = null;
+  });
+}
+
+// Setup events for both containers
+clSetupEvents('cl-gallery-container');
+clSetupEvents('cl-board-container');
+
+// Context menu event delegation (global)
+document.getElementById('cl-context-menu').addEventListener('click', (e) => {
+  const item = e.target.closest('.cl-ctx-item');
+  if (!item || !CL.contextCardId) return;
+  const action = item.dataset.action;
+  const cardId = CL.contextCardId;
+  clHideContextMenu();
+
+  switch (action) {
+    case 'edit':
+      clOpenCardEditor(cardId);
+      break;
+    case 'add-category':
+      clOpenCardEditor(null, cardId, 'category');
+      break;
+    case 'add-entry':
+      clOpenCardEditor(null, cardId, 'entry');
+      break;
+    case 'color': {
+      const box = document.querySelector(`[data-id="${cardId}"].cl-node-box, [data-id="${cardId}"].cl-folder-card`);
+      if (box) {
+        const rect = box.getBoundingClientRect();
+        clShowColorPicker(cardId, rect.left, rect.bottom + 4);
+      }
+      break;
+    }
+    case 'move':
+      clShowMoveDialog(cardId);
+      break;
+    case 'delete':
+      clDeleteCard(cardId);
+      break;
+  }
+});
+
+// Color picker delegation
+document.getElementById('cl-color-picker').addEventListener('click', (e) => {
+  const dot = e.target.closest('.cl-color-dot');
+  if (!dot || !CL.contextCardId) return;
+  clSetColor(CL.contextCardId, dot.dataset.color || '');
+  clHideColorPicker();
+});
+
+// Move modal delegation
+document.getElementById('cl-move-list').addEventListener('click', (e) => {
+  const item = e.target.closest('.cl-move-item');
+  if (!item || !CL.moveCardId) return;
+  clMoveCard(CL.moveCardId, item.dataset.parent || '');
+  clCloseMoveModal();
+});
+
+// Close context menu / color picker / add popup on click outside
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#cl-context-menu') && !e.target.closest('.cl-node-menu-btn')) {
+    clHideContextMenu();
+  }
+  if (!e.target.closest('#cl-color-picker') && !e.target.closest('.cl-ctx-item[data-action="color"]')) {
+    clHideColorPicker();
+  }
+  if (!e.target.closest('.cl-add-popup') && !e.target.closest('.cl-add-btn') && !e.target.closest('.cl-fab')) {
+    document.querySelectorAll('.cl-add-popup').forEach(p => p.style.display = 'none');
+  }
+});
+
+// ── FAB Add Button ──
+window.clOpenAddPopup = function(containerId) {
+  if (isBoardClosed() && !CL.isTeacher) { toast('마감된 보드입니다.'); return; }
+  const popup = document.querySelector(`#${containerId}`)?.closest('.view')?.querySelector('.cl-add-popup');
+  if (popup) {
+    popup.style.display = popup.style.display === 'flex' ? 'none' : 'flex';
+    // Reset to position near FAB
+    popup.style.position = 'fixed';
+    popup.style.left = '';
+    popup.style.top = '';
+  }
+};
+
+window.clAddFromPopup = function(type, containerId) {
+  const popup = document.querySelector(`#${containerId}`)?.closest('.view')?.querySelector('.cl-add-popup');
+  if (popup) popup.style.display = 'none';
+  // In folder view, add under current folder; in tree view, add to root
+  const parentId = CL.addPopupParentId ?? (CL.currentView === 'folder' ? CL.folderParentId : '');
+  CL.addPopupParentId = undefined;
+  clOpenCardEditor(null, parentId, type);
+};
+
+/** Show add popup positioned at cursor (for tree view + buttons) */
+function clShowAddPopupAt(x, y, parentId, containerId) {
+  if (isBoardClosed() && !CL.isTeacher) { toast('마감된 보드입니다.'); return; }
+  CL.addPopupParentId = parentId;
+  const popup = document.querySelector(`#${containerId}`)?.closest('.view')?.querySelector('.cl-add-popup');
+  if (!popup) return;
+  popup.style.display = 'flex';
+  popup.style.position = 'fixed';
+  popup.style.left = Math.min(x, window.innerWidth - 160) + 'px';
+  popup.style.top = Math.min(y, window.innerHeight - 80) + 'px';
+  popup.style.bottom = 'auto';
+  popup.style.right = 'auto';
+}
+
+// ── Teacher: Add Category (toolbar button) ──
 // ── Modal ↔ History (back button closes modals) ──
-const MODAL_IDS = ['detail-modal', 'submit-modal', 'inquiry-submit-modal', 'edit-board-modal', 'change-name-modal'];
+const MODAL_IDS = ['detail-modal', 'submit-modal', 'inquiry-submit-modal', 'classify-card-modal', 'cl-move-modal', 'cl-members-modal', 'edit-board-modal', 'change-name-modal'];
 
 function openModalHistory() {
   history.pushState({ modal: true }, '');
@@ -2277,7 +3953,11 @@ window.closeModal = function(modalId) {
   if (!closed) return;
   existingFiles = null;
   teacherEditMode = false;
-  if (history.state?.modal) history.back();
+  // Pop modal history state, but prevent popstate from triggering full re-route
+  if (history.state?.modal) {
+    CL.modalClosing = true;
+    history.back();
+  }
 };
 
 function isAnyModalOpen() {
@@ -2285,14 +3965,35 @@ function isAnyModalOpen() {
 }
 
 window.addEventListener('popstate', () => {
+  // If closeModal triggered this popstate, just ignore (modal already closed)
+  if (CL.modalClosing) {
+    CL.modalClosing = false;
+    return;
+  }
+  // If a modal is still open (user pressed browser back), just hide it
   if (isAnyModalOpen()) {
-    // popstate already popped the modal state — just hide modals, don't call history.back()
     MODAL_IDS.forEach(id => { document.getElementById(id).style.display = 'none'; });
     existingFiles = null;
     teacherEditMode = false;
     cleanupComments();
     return;
   }
+
+  const activeView = document.querySelector('.view.active');
+  const hash = location.hash.slice(1);
+
+  // If classify view is active, handle sub-routing without full re-init
+  if (activeView?.id === 'classify-gallery-view' && hash.startsWith('classify/')) {
+    const parsed = clParseSubRoute(hash);
+    if (parsed) { clApplySubRoute(parsed, 'cl-gallery-container'); return; }
+  }
+  if (activeView?.id === 'classify-board-view' && hash.startsWith('board/')) {
+    const parsed = clParseSubRoute(hash);
+    if (parsed) { clApplySubRoute(parsed, 'cl-board-container'); return; }
+    // Even if sub-route parse fails, stay on classify board view (modal close case)
+    return;
+  }
+
   handleRoute();
 });
 

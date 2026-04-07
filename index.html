@@ -13,6 +13,15 @@
       <div class="empty-state" style="min-height:80vh"><div class="spinner"></div><p>로딩 중...</p></div>
     </div>
 
+    <!-- 비공개 보드 -->
+    <div id="private-view" class="view">
+      <div class="empty-state" style="min-height:80vh">
+        <div class="empty-state-icon">🔒</div>
+        <h2 id="private-board-title"></h2>
+        <p>비공개 보드입니다.<br>현재 접근할 수 없습니다.</p>
+      </div>
+    </div>
+
     <!-- 교사: 로그인 -->
     <div id="login-view" class="view">
       <div class="login-container">
@@ -90,6 +99,7 @@
           <div class="board-type-toggle">
             <button class="type-toggle-btn active" data-type="assignment" onclick="selectBoardType('assignment')">📋 과제 수합</button>
             <button class="type-toggle-btn" data-type="inquiry" onclick="selectBoardType('inquiry')">🔬 탐구 질문판</button>
+            <button class="type-toggle-btn" data-type="classify" onclick="selectBoardType('classify')">🗂 분류하기</button>
           </div>
         </div>
         <div class="form-group">
@@ -123,6 +133,18 @@
           </div>
           <p class="form-hint">학생이 질문 작성 시 카테고리를 선택합니다. 교사가 나중에 이동할 수 있습니다.</p>
         </div>
+        <div id="classify-options" class="form-group" style="display:none">
+          <label>참여 모드</label>
+          <div class="radio-group">
+            <label class="radio-label"><input type="radio" name="classify-mode" value="individual" checked> 👤 개인별</label>
+            <label class="radio-label"><input type="radio" name="classify-mode" value="team"> 👥 모둠형</label>
+          </div>
+          <div id="classify-team-options" style="display:none; margin-top:10px;">
+            <label>모둠 수</label>
+            <input type="number" id="classify-group-count" value="6" min="2" max="20" style="width:80px; padding:8px; border:1px solid var(--border); border-radius:8px;">
+          </div>
+          <p class="form-hint">학생이 직접 분류 기준과 항목을 만들어 나갑니다.</p>
+        </div>
         <button class="btn btn-primary btn-full" onclick="createBoard()">보드 생성</button>
       </div>
     </div>
@@ -155,6 +177,10 @@
         <div class="name-form">
           <label>이름을 입력하세요</label>
           <input type="text" id="student-name-input" placeholder="홍길동" autofocus>
+          <div id="name-team-select" style="display:none; margin-top:12px;">
+            <label>모둠 선택</label>
+            <select id="student-team-select" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:.95rem;"></select>
+          </div>
           <button class="btn btn-primary btn-full" onclick="enterBoard()">입장하기</button>
         </div>
       </div>
@@ -199,6 +225,39 @@
       <button class="fab" onclick="openInquirySubmitForm()">❓ 질문하기</button>
     </div>
 
+    <!-- 학생: 분류하기 갤러리 (개요+트리+폴더 뷰) -->
+    <div id="classify-gallery-view" class="view">
+      <header class="gallery-header">
+        <div class="gallery-header-left">
+          <h1 id="classify-gallery-title"></h1>
+          <p id="classify-gallery-desc" class="gallery-desc"></p>
+        </div>
+        <div class="gallery-header-right">
+          <span id="classify-gallery-join-code" class="count-badge" style="cursor:pointer" onclick="clCopyJoinCode()" title="클릭하여 복사"></span>
+          <span id="classify-gallery-member-count" class="count-badge"></span>
+          <span id="classify-gallery-student-name" class="student-badge"></span>
+          <button class="btn btn-small" onclick="changeStudentName()">이름 변경</button>
+          <select id="cl-group-select" onchange="clOnGroupChange(this.value)" style="display:none; padding:6px 10px; border:1px solid var(--border); border-radius:8px; font-size:.85rem; font-family:inherit;"></select>
+        </div>
+      </header>
+      <div class="cl-toolbar" id="cl-gallery-toolbar">
+        <button class="cl-back-btn" id="cl-gallery-back-btn" onclick="clBackToOverview('cl-gallery-container')" style="display:none">← 우리반</button>
+        <div class="cl-view-toggle" id="cl-gallery-view-toggle">
+          <button class="cl-view-btn active" data-view="tree" onclick="clSwitchView('tree','cl-gallery-container')">🌳 나무구조</button>
+          <button class="cl-view-btn" data-view="folder" onclick="clSwitchView('folder','cl-gallery-container')">📁 폴더</button>
+        </div>
+        <span id="classify-gallery-count" class="count-badge"></span>
+        <div class="cl-search-box" id="cl-gallery-search-box">
+          <input type="text" id="cl-search-gallery" placeholder="검색..." oninput="clSearch(this.value,'cl-gallery-container')">
+        </div>
+      </div>
+      <div id="cl-gallery-container" class="cl-container"></div>
+      <div class="cl-add-popup" id="cl-gallery-add-popup" style="display:none">
+        <button class="cl-add-popup-btn" onclick="clAddFromPopup('category','cl-gallery-container')">📁 분류기준</button>
+        <button class="cl-add-popup-btn" onclick="clAddFromPopup('entry','cl-gallery-container')">📝 카드</button>
+      </div>
+    </div>
+
     <!-- 학생: 질문 작성 모달 -->
     <div id="inquiry-submit-modal" class="modal" style="display:none">
       <div class="modal-overlay" onclick="closeInquirySubmitModal()"></div>
@@ -232,6 +291,7 @@
       <div class="board-toolbar">
         <span id="inquiry-submission-count" class="count-badge"></span>
         <div class="toolbar-actions">
+          <button class="btn btn-small" id="inquiry-peek-toggle" onclick="togglePeekFromBoard()"></button>
           <button class="btn btn-small" onclick="openEditBoardModal()">✏️ 수정</button>
           <button class="btn btn-small" onclick="showBoardQr()">📱 QR 코드</button>
           <button class="btn btn-small" onclick="copyBoardLink()">🔗 링크 복사</button>
@@ -239,6 +299,42 @@
         </div>
       </div>
       <div id="inquiry-board-shelf" class="shelf-container"></div>
+    </div>
+
+    <!-- 교사: 분류하기 보드뷰 (개요+트리+폴더) -->
+    <div id="classify-board-view" class="view">
+      <header class="sub-header">
+        <button class="btn-back" onclick="backToDashboard()">← 대시보드</button>
+        <h2 id="classify-board-title-display"></h2>
+        <div class="board-code-badge" id="classify-board-code-badge"></div>
+        <button class="btn btn-sm btn-secondary" id="classify-board-member-count" style="margin-left:8px" onclick="clOpenMembersModal()"></button>
+      </header>
+      <div id="classify-board-desc-display" class="board-desc"></div>
+      <div class="board-toolbar">
+        <span id="classify-submission-count" class="count-badge"></span>
+        <div class="toolbar-actions">
+          <button class="btn btn-small" id="cl-peek-toggle-btn" onclick="clTogglePeekFromBoard()"></button>
+          <button class="btn btn-small" onclick="openEditBoardModal()">✏️ 수정</button>
+          <button class="btn btn-small" onclick="showBoardQr()">📱 QR 코드</button>
+          <button class="btn btn-small" onclick="copyBoardLink()">🔗 링크 복사</button>
+          <button class="btn btn-small btn-danger" onclick="deleteBoard()">🗑 보드 삭제</button>
+        </div>
+      </div>
+      <div class="cl-toolbar" id="cl-board-toolbar">
+        <button class="cl-back-btn" id="cl-board-back-btn" onclick="clBackToOverview('cl-board-container')" style="display:none">← 우리반</button>
+        <div class="cl-view-toggle" id="cl-board-view-toggle">
+          <button class="cl-view-btn active" data-view="tree" onclick="clSwitchView('tree','cl-board-container')">🌳 나무구조</button>
+          <button class="cl-view-btn" data-view="folder" onclick="clSwitchView('folder','cl-board-container')">📁 폴더</button>
+        </div>
+        <div class="cl-search-box" id="cl-board-search-box">
+          <input type="text" id="cl-search-board" placeholder="검색..." oninput="clSearch(this.value,'cl-board-container')">
+        </div>
+      </div>
+      <div id="cl-board-container" class="cl-container"></div>
+      <div class="cl-add-popup" id="cl-board-add-popup" style="display:none">
+        <button class="cl-add-popup-btn" onclick="clAddFromPopup('category','cl-board-container')">📁 분류기준</button>
+        <button class="cl-add-popup-btn" onclick="clAddFromPopup('entry','cl-board-container')">📝 카드</button>
+      </div>
     </div>
 
     <!-- 학생: 제출 모달 -->
@@ -330,6 +426,7 @@
       <div class="board-toolbar">
         <span id="submission-count" class="count-badge"></span>
         <div class="toolbar-actions">
+          <button class="btn btn-small" id="board-peek-toggle" onclick="togglePeekFromBoard()"></button>
           <button class="btn btn-small" onclick="openEditBoardModal()">✏️ 수정</button>
           <button class="btn btn-small" onclick="showBoardQr()">📱 QR 코드</button>
           <button class="btn btn-small" onclick="copyBoardLink()">🔗 링크 복사</button>
@@ -408,6 +505,70 @@
       </div>
     </div>
   </div>
+
+  <!-- 분류: 카드 편집 모달 -->
+  <div id="classify-card-modal" class="modal" style="display:none">
+    <div class="modal-overlay" onclick="clCloseCardEditor()"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="cl-editor-heading">새 항목</h2>
+        <button class="modal-close" onclick="clCloseCardEditor()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>제목 <span class="required">*</span></label>
+          <input type="text" id="cl-editor-title" placeholder="제목을 입력하세요">
+        </div>
+        <div class="form-group" id="cl-editor-image-group">
+          <label>이미지 (선택)</label>
+          <div id="cl-editor-img-preview" class="cl-img-preview" style="display:none"></div>
+          <div id="cl-editor-dropzone" class="cl-dropzone">
+            <input type="file" id="cl-editor-file" accept="image/*" onchange="clEditorFileChange(this)">
+            <p>클릭하거나 이미지를 드래그하세요</p>
+          </div>
+        </div>
+        <div class="form-group" id="cl-editor-content-group">
+          <label>설명 (선택)</label>
+          <textarea id="cl-editor-content" placeholder="설명을 입력하세요" rows="4"></textarea>
+        </div>
+        <button class="btn btn-primary btn-full" id="cl-editor-save" onclick="clSaveCard()">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 분류: 이동 모달 -->
+  <div id="cl-move-modal" class="modal" style="display:none">
+    <div class="modal-overlay" onclick="clCloseMoveModal()"></div>
+    <div class="modal-content" style="max-width:400px">
+      <div class="modal-header">
+        <h2>이동할 위치 선택</h2>
+        <button class="modal-close" onclick="clCloseMoveModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="cl-move-list" class="cl-move-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 분류: 참여자 관리 모달 -->
+  <div id="cl-members-modal" class="modal" style="display:none">
+    <div class="modal-overlay" onclick="clCloseMembersModal()"></div>
+    <div class="modal-content" style="max-width:500px">
+      <div class="modal-header">
+        <h2>참여자 관리</h2>
+        <button class="modal-close" onclick="clCloseMembersModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="cl-members-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 분류: 컨텍스트 메뉴 -->
+  <div id="cl-context-menu" class="cl-context-menu" style="display:none"></div>
+
+  <!-- 분류: 색상 피커 -->
+  <div id="cl-color-picker" class="cl-color-picker" style="display:none"></div>
 
   <div id="toast" class="toast"></div>
   <script type="module" src="app.js"></script>
