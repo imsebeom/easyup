@@ -229,4 +229,10 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - 변경: `Authorization: Bearer {gcloud_token}` (서버 모드, IAM 권한으로 보안 규칙 우회)
   - `gcloud auth print-access-token` (shell=True), ~1시간 캐싱
   - `FIREBASE_API_KEY` 환경변수 불필요해짐
+- [x] eleup.kr SSL 인증서 이슈 대응
+  - 원인: cafe24 와일드카드 CNAME(`*.eleup.kr → eleup.kr`)이 `_acme-challenge` DNS 조회 간섭
+  - 추가 원인: cafe24 네임서버 17개 중 5개가 eleup.kr 존 데이터 미동기화 (SERVFAIL)
+  - 조치: `_acme-challenge` TXT 레코드 추가 (cafe24 DNS), 학생 공유 URL을 web.app으로 임시 고정
+  - `getJoinLink()`: `location.origin` → `https://easyup-1604e.web.app` 하드코딩 (임시)
+  - eleup.kr SSL 정상화 후 `location.origin`으로 복원 필요
 - [ ] 모바일 반응형 테스트

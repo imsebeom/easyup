@@ -299,7 +299,8 @@ function sanitizeUrl(url) {
 
 /** Build student join link for a board code */
 function getJoinLink(code) {
-  return `${location.origin}${location.pathname}#join/${code}`;
+  const origin = 'https://easyup-1604e.web.app';
+  return `${origin}${location.pathname}#join/${code}`;
 }
 
 /** Build submissions query for a board */
