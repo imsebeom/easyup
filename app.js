@@ -3788,15 +3788,17 @@ function clBuildBookletPDF(canvases) {
     pdf.addImage(imgData, 'JPEG', destX, 0, halfW, halfH);
   }
 
+  // Booklet imposition: fold right over left → right half = front cover
+  // Short-edge flip: back side rotated 180°, positions NOT swapped
   for (let i = 0; i < sheetCount; i++) {
     if (i > 0) pdf.addPage([sheetW, sheetH], 'landscape');
-    // Front side (normal): left=last pages, right=first pages
-    const frontLeft = 2 * i;
-    const frontRight = totalHalves - 1 - 2 * i;
+    // Front: left=끝쪽(뒤표지방향), right=앞쪽(앞표지방향)
+    const frontLeft = totalHalves - 1 - 2 * i;
+    const frontRight = 2 * i;
     drawHalf(halves[frontLeft], 0, false);
     drawHalf(halves[frontRight], halfW, false);
 
-    // Back side: swapped + rotated 180° for short-edge flip
+    // Back: 짧은쪽 넘김 → 위치 유지 + 180° 회전
     pdf.addPage([sheetW, sheetH], 'landscape');
     const backLeft = totalHalves - 2 - 2 * i;
     const backRight = 2 * i + 1;
