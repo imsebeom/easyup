@@ -3701,20 +3701,15 @@ async function clCaptureBookPages(progressCb) {
     renderBox.innerHTML = `<div style="width:${w}px;height:${h}px;overflow:hidden;display:flex;align-items:center;justify-content:center;">${pageHtml}</div>`;
 
     renderBox.querySelectorAll('.cl-star-btn, .cl-node-menu-btn').forEach(el => el.remove());
-    renderBox.querySelectorAll('img').forEach(img => {
-      img.crossOrigin = 'anonymous';
-      const src = img.src; img.src = ''; img.src = src;
-    });
     await clWaitForImages(renderBox);
 
     const canvas = await window.html2canvas(renderBox.firstChild, {
-      useCORS: true, allowTaint: false, scale: 2, logging: false,
+      useCORS: true, allowTaint: true, scale: 1.5, logging: false,
       width: w, height: h, backgroundColor: null,
     });
     canvases.push({ canvas, w, h, type: pageData.type });
 
     if (progressCb) cancelled = progressCb(i + 1, pages.length);
-    await new Promise(r => setTimeout(r, 30));
   }
 
   renderBox.remove();
@@ -3766,18 +3761,18 @@ function clBuildBookletPDF(canvases) {
   const halfH = PDF_H;
   const sheetW = halfW * 2;
   const sheetH = halfH;
-  const s = 2; // html2canvas scale
+  const s = 1.5; // html2canvas scale
 
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [sheetW, sheetH], hotfixes: ['px_scaling'] });
 
   function drawHalf(half, destX) {
     if (!half) return;
     const tc = document.createElement('canvas');
-    tc.width = halfW * 2; tc.height = halfH * 2;
+    tc.width = Math.round(halfW * s); tc.height = Math.round(halfH * s);
     const ctx = tc.getContext('2d');
     ctx.drawImage(half.canvas,
-      half.sx * s, 0, half.sw * s, half.sh * s,
-      0, 0, halfW * 2, halfH * 2
+      Math.round(half.sx * s), 0, Math.round(half.sw * s), Math.round(half.sh * s),
+      0, 0, tc.width, tc.height
     );
     const imgData = tc.toDataURL('image/jpeg', 0.90);
     pdf.addImage(imgData, 'JPEG', destX, 0, halfW, halfH);
@@ -3858,7 +3853,7 @@ async function clBookDownloadPDF(mode = 'normal') {
   }
 }
 
-async function clWaitForImages(container, timeout = 5000) {
+async function clWaitForImages(container, timeout = 3000) {
   const imgs = container.querySelectorAll('img');
   await Promise.all([...imgs].map(img =>
     img.complete ? Promise.resolve() :
