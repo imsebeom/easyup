@@ -82,7 +82,8 @@ add_inquiry_question(code, "학생이름", "질문 내용", category="factual")
 
 CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
 
-의존성: `requests` (표준 pip). Firestore REST API 직접 호출, 추가 인증 불필요.
+의존성: `requests` (표준 pip). Firestore REST API + gcloud ADC 인증 (Bearer 토큰, 보안 규칙 우회 서버 모드).
+인증: `gcloud auth print-access-token` (shell=True)로 토큰 발급, 캐싱 (~1시간). `gcloud auth login` 필요.
 
 ## 주의사항
 - Firestore `where()` + `orderBy()` 복합 쿼리 → 반드시 복합 색인(`firestore.indexes.json`) 필요
@@ -223,4 +224,9 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - Google OAuth: firebase-config.js authDomain → eleup.kr로 변경
   - Firebase Auth 승인 도메인에 eleup.kr 추가 (Identity Platform API)
   - Google Cloud OAuth 클라이언트 리디렉션 URI에 `https://eleup.kr/__/auth/handler` 추가
+- [x] eleup_api.py 인증 방식 변경: API 키 → gcloud Bearer 토큰
+  - 기존: `?key=API_KEY` (클라이언트 모드, Firestore 보안 규칙에 의해 create 차단)
+  - 변경: `Authorization: Bearer {gcloud_token}` (서버 모드, IAM 권한으로 보안 규칙 우회)
+  - `gcloud auth print-access-token` (shell=True), ~1시간 캐싱
+  - `FIREBASE_API_KEY` 환경변수 불필요해짐
 - [ ] 모바일 반응형 테스트

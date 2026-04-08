@@ -21,9 +21,35 @@ CLI:
 import os, sys, json, time, random, requests
 from datetime import datetime, timezone
 
+# ── Auth ──
+_cached_token = {"token": None, "expiry": 0}
+
+
+def _get_auth_headers():
+    """Google Cloud 인증 토큰 발급 (캐싱). 보안 규칙 우회 서버 모드.
+    gcloud CLI access token 사용 (cloud-platform 스코프 포함).
+    """
+    now = time.time()
+    if _cached_token["token"] and now < _cached_token["expiry"] - 60:
+        return {"Authorization": f'Bearer {_cached_token["token"]}'}
+    try:
+        import subprocess
+        result = subprocess.run(
+            "gcloud auth print-access-token",
+            capture_output=True, text=True, timeout=10, shell=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            token = result.stdout.strip()
+            _cached_token["token"] = token
+            _cached_token["expiry"] = now + 3500  # ~1시간
+            return {"Authorization": f"Bearer {token}"}
+    except Exception:
+        pass
+    return {}
+
+
 # ── Constants ──
-PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "")
-API_KEY = os.environ.get("FIREBASE_API_KEY", "")
+PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "easyup-1604e")
 BASE_URL = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
 HOSTING_URL = os.environ.get("FIREBASE_HOSTING_URL", "https://eleup.kr")
 
@@ -44,19 +70,19 @@ def _generate_sub_id():
 
 
 def _update_document(doc_path, **fields):
-    url = f"{BASE_URL}/{doc_path}?key={API_KEY}"
+    url = f"{BASE_URL}/{doc_path}"
     mask = "&".join(f"updateMask.fieldPaths={k}" for k in fields)
-    url = f"{url}&{mask}"
+    url = f"{url}?{mask}"
     body = {"fields": {k: _to_firestore_value(v) for k, v in fields.items()}}
-    resp = requests.patch(url, json=body)
+    resp = requests.patch(url, json=body, headers=_get_auth_headers())
     if resp.status_code != 200:
         raise Exception(f"Firestore 문서 수정 실패 ({resp.status_code}): {resp.text}")
     return True
 
 
 def _delete_document(doc_path):
-    url = f"{BASE_URL}/{doc_path}?key={API_KEY}"
-    resp = requests.delete(url)
+    url = f"{BASE_URL}/{doc_path}"
+    resp = requests.delete(url, headers=_get_auth_headers())
     if resp.status_code not in (200, 204):
         raise Exception(f"Firestore 문서 삭제 실패 ({resp.status_code}): {resp.text}")
     return True
@@ -106,9 +132,9 @@ def _from_firestore_value(v):
 
 def _create_document(collection_path, doc_id, fields):
     """Firestore REST API로 문서 생성"""
-    url = f"{BASE_URL}/{collection_path}?documentId={doc_id}&key={API_KEY}"
+    url = f"{BASE_URL}/{collection_path}?documentId={doc_id}"
     body = {"fields": {k: _to_firestore_value(v) for k, v in fields.items()}}
-    resp = requests.post(url, json=body)
+    resp = requests.post(url, json=body, headers=_get_auth_headers())
     if resp.status_code not in (200, 201):
         raise Exception(f"Firestore 문서 생성 실패 ({resp.status_code}): {resp.text}")
     return resp.json()
@@ -116,8 +142,8 @@ def _create_document(collection_path, doc_id, fields):
 
 def _get_document(doc_path):
     """Firestore REST API로 문서 조회"""
-    url = f"{BASE_URL}/{doc_path}?key={API_KEY}"
-    resp = requests.get(url)
+    url = f"{BASE_URL}/{doc_path}"
+    resp = requests.get(url, headers=_get_auth_headers())
     if resp.status_code == 404:
         return None
     if resp.status_code != 200:
@@ -198,7 +224,7 @@ def create_inquiry_board(title, description="", deadline=None,
 
 def list_boards(owner_uid=OWNER_UID):
     """소유자의 보드 목록 조회. Returns: list of dict."""
-    url = f"{BASE_URL}:runQuery?key={API_KEY}"
+    url = f"{BASE_URL}:runQuery"
     body = {
         "structuredQuery": {
             "from": [{"collectionId": "boards"}],
@@ -212,7 +238,7 @@ def list_boards(owner_uid=OWNER_UID):
             "orderBy": [{"field": {"fieldPath": "createdAt"}, "direction": "DESCENDING"}],
         }
     }
-    resp = requests.post(url, json=body)
+    resp = requests.post(url, json=body, headers=_get_auth_headers())
     if resp.status_code != 200:
         raise Exception(f"보드 목록 조회 실패 ({resp.status_code}): {resp.text}")
     results = []
@@ -231,10 +257,10 @@ def list_submissions(board_code):
     results = []
     page_token = None
     while True:
-        url = f"{BASE_URL}/boards/{board_code}/submissions?key={API_KEY}&pageSize=500"
+        url = f"{BASE_URL}/boards/{board_code}/submissions?pageSize=500"
         if page_token:
             url += f"&pageToken={page_token}"
-        resp = requests.get(url)
+        resp = requests.get(url, headers=_get_auth_headers())
         if resp.status_code != 200:
             raise Exception(f"제출물 조회 실패 ({resp.status_code}): {resp.text}")
         data = resp.json()
@@ -254,10 +280,10 @@ def list_users(role=None):
     results = []
     page_token = None
     while True:
-        url = f"{BASE_URL}/users?key={API_KEY}&pageSize=500"
+        url = f"{BASE_URL}/users?pageSize=500"
         if page_token:
             url += f"&pageToken={page_token}"
-        resp = requests.get(url)
+        resp = requests.get(url, headers=_get_auth_headers())
         if resp.status_code != 200:
             raise Exception(f"사용자 조회 실패 ({resp.status_code}): {resp.text}")
         data = resp.json()
@@ -275,14 +301,14 @@ def list_users(role=None):
 
 def list_all_boards():
     """전체 보드 목록 조회 (소유자 무관). Returns: list of dict."""
-    url = f"{BASE_URL}:runQuery?key={API_KEY}"
+    url = f"{BASE_URL}:runQuery"
     body = {
         "structuredQuery": {
             "from": [{"collectionId": "boards"}],
             "orderBy": [{"field": {"fieldPath": "createdAt"}, "direction": "DESCENDING"}],
         }
     }
-    resp = requests.post(url, json=body)
+    resp = requests.post(url, json=body, headers=_get_auth_headers())
     if resp.status_code != 200:
         raise Exception(f"전체 보드 조회 실패 ({resp.status_code}): {resp.text}")
     results = []
