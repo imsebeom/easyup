@@ -212,4 +212,12 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - 참여 코드 뱃지 (학생 뷰, 클릭 복사)
   - 멤버 수 뱃지 (실시간 업데이트)
   - board doc onSnapshot으로 멤버 실시간 동기화
+- [x] EasyUp → EleUp(엘리업) 브랜딩 변경
+  - 도메인: eleup.kr (Firebase Hosting 연결 완료)
+  - UI 텍스트: index.html title + 헤더 3곳
+  - API 파일: easyup_api.py → eleup_api.py 리네임
+  - 환경변수: EASYUP_* → ELEUP_*, HOSTING_URL → eleup.kr
+  - 보고서: usage_report.py, functions/index.js 브랜드명 변경
+  - localStorage 키(`easyup_*`)는 기존 학생 데이터 호환성 위해 유지
+  - Firebase 프로젝트 ID(`easyup-1604e`)는 변경 불가 → 그대로 유지
 - [ ] 모바일 반응형 테스트
