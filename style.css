@@ -798,7 +798,7 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
   padding-bottom:8px;
   border-bottom:2px solid var(--entry-color, #6B7280);
 }
-.clb-entry-img { border-radius:8px; overflow:hidden; flex:1; min-height:0; }
+.clb-entry-img { border-radius:8px; overflow:hidden; flex:2; min-height:0; margin:0 8px; }
 .clb-entry-img img { width:100%; height:100%; object-fit:cover; display:block; }
 .clb-entry-desc {
   font-size:.95rem; color:#4a3728; line-height:1.8;
