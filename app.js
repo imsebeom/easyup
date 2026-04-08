@@ -3568,7 +3568,6 @@ function clRenderBookSide(side) {
   }
 
   // Entry — dictionary-style card (image + text on one page)
-  const time = card.createdAt ? formatDateShort(card.createdAt.toDate()) : '';
   const breadcrumb = clBookBreadcrumb(card);
   return `
     <div class="clb-entry" data-id="${escapeHtml(card.id)}" data-type="${card.cardType}" style="--entry-color:${color}">
@@ -3578,7 +3577,6 @@ function clRenderBookSide(side) {
       ${card.content ? `<div class="clb-entry-desc">${escapeHtml(card.content)}</div>` : ''}
       <div class="clb-entry-footer">
         <span class="clb-entry-author">${escapeHtml(card.name || '')}</span>
-        <span class="clb-entry-time">${time}</span>
         <button class="cl-star-btn ${isStarred ? 'cl-starred' : ''}" data-id="${escapeHtml(card.id)}">
           ${isStarred ? '★' : '☆'} ${starCount > 0 ? starCount : ''}
         </button>
