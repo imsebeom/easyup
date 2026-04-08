@@ -1,8 +1,8 @@
 """
-EasyUp API — 보드 생성/조회 유틸리티
+EleUp API — 보드 생성/조회 유틸리티
 
 사용법:
-    from easyup_api import create_board, create_inquiry_board, get_board, get_join_link
+    from eleup_api import create_board, create_inquiry_board, get_board, get_join_link
 
     # 과제 수합 보드
     code = create_board("3월 독서감상문", description="A4 1장 분량")
@@ -11,11 +11,11 @@ EasyUp API — 보드 생성/조회 유틸리티
     code = create_inquiry_board("3단원 탐구 질문판", description="지층과 화석에 대해 궁금한 점")
 
     # 참여 링크
-    print(get_join_link(code))  # https://YOUR_PROJECT.web.app/#join/ABC123
+    print(get_join_link(code))  # https://eleup.kr/#join/ABC123
 
 CLI:
-    python easyup_api.py assignment "과제 제목" --desc "설명"
-    python easyup_api.py inquiry "질문판 제목" --desc "설명"
+    python eleup_api.py assignment "과제 제목" --desc "설명"
+    python eleup_api.py inquiry "질문판 제목" --desc "설명"
 """
 
 import os, sys, json, time, random, requests
@@ -25,10 +25,10 @@ from datetime import datetime, timezone
 PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "")
 API_KEY = os.environ.get("FIREBASE_API_KEY", "")
 BASE_URL = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
-HOSTING_URL = os.environ.get("FIREBASE_HOSTING_URL", f"https://{PROJECT_ID}.web.app")
+HOSTING_URL = os.environ.get("FIREBASE_HOSTING_URL", "https://eleup.kr")
 
-OWNER_UID = os.environ.get("EASYUP_OWNER_UID", "")
-OWNER_NAME = os.environ.get("EASYUP_OWNER_NAME", "")
+OWNER_UID = os.environ.get("ELEUP_OWNER_UID", "")
+OWNER_NAME = os.environ.get("ELEUP_OWNER_NAME", "")
 
 CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -373,7 +373,7 @@ if __name__ == "__main__":
     sys.stdout = __import__("io").TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
     if len(sys.argv) < 3:
-        print("사용법: python easyup_api.py <assignment|inquiry> <제목> [--desc 설명]")
+        print("사용법: python eleup_api.py <assignment|inquiry> <제목> [--desc 설명]")
         sys.exit(1)
 
     board_type = sys.argv[1]

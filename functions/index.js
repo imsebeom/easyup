@@ -158,7 +158,7 @@ function generateReport(teacherUsage, now, weekAgo) {
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Pretendard', -apple-system, sans-serif; max-width: 700px; margin: 0 auto; padding: 20px; color: #333;">
 <h2 style="color: #4A90D9; border-bottom: 2px solid #4A90D9; padding-bottom: 8px;">
-  EasyUp 주간 사용량 보고서
+  EleUp 주간 사용량 보고서
 </h2>
 <p style="color: #666; font-size: 14px;">${period}</p>
 
@@ -215,7 +215,7 @@ async function sendEmail(html, period, secrets) {
   await transporter.sendMail({
     from: secrets.sender,
     to: secrets.recipient,
-    subject: `[EasyUp] 주간 사용량 보고서 (${period})`,
+    subject: `[EleUp] 주간 사용량 보고서 (${period})`,
     html,
   });
 }

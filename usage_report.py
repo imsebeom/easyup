@@ -1,5 +1,5 @@
 """
-EasyUp 주간 교사별 사용량/비용 보고서
+EleUp 주간 교사별 사용량/비용 보고서
 
 매주 실행하여 교사별 Firestore/Storage 사용량을 집계하고
 추정 비용을 이메일로 발송한다.
@@ -31,7 +31,7 @@ if env_path.exists():
             os.environ.setdefault(k.strip(), v.strip())
 
 sys.path.insert(0, str(Path(__file__).parent))
-from easyup_api import list_all_boards, list_submissions
+from eleup_api import list_all_boards, list_submissions
 
 # ── 설정 ──
 REPORT_EMAIL = os.environ.get("REPORT_EMAIL", "")
@@ -221,7 +221,7 @@ def generate_report(teacher_usage, now, week_ago):
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Pretendard', -apple-system, sans-serif; max-width: 700px; margin: 0 auto; padding: 20px; color: #333;">
 <h2 style="color: #4A90D9; border-bottom: 2px solid #4A90D9; padding-bottom: 8px;">
-  EasyUp 주간 사용량 보고서
+  EleUp 주간 사용량 보고서
 </h2>
 <p style="color: #666; font-size: 14px;">{period}</p>
 
@@ -285,7 +285,7 @@ def send_email(html, period):
         return False
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"[EasyUp] 주간 사용량 보고서 ({period})"
+    msg["Subject"] = f"[EleUp] 주간 사용량 보고서 ({period})"
     msg["From"] = GMAIL_SENDER
     msg["To"] = REPORT_EMAIL
 
@@ -305,7 +305,7 @@ def send_email(html, period):
 def main():
     dry_run = "--dry-run" in sys.argv
 
-    log("===== EasyUp 주간 사용량 보고서 시작 =====")
+    log("===== EleUp 주간 사용량 보고서 시작 =====")
 
     try:
         teacher_usage, now, week_ago = collect_usage()

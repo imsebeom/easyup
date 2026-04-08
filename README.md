@@ -1,4 +1,4 @@
-# EasyUp - 과제 수합 / 탐구 질문판
+# EleUp - 과제 수합 / 탐구 질문판 / 분류하기
 
 Padlet 대안으로, 교사가 보드를 만들고 학생들이 과제를 제출하는 웹앱입니다.
 
@@ -32,10 +32,10 @@ firebase deploy --only hosting
 
 ## API 유틸리티
 
-`easyup_api.py`로 보드를 프로그래밍적으로 관리할 수 있습니다.
+`eleup_api.py`로 보드를 프로그래밍적으로 관리할 수 있습니다.
 
 ```python
-from easyup_api import create_board, create_inquiry_board, add_inquiry_question
+from eleup_api import create_board, create_inquiry_board, add_inquiry_question
 
 # 과제 수합 보드 생성
 code, link = create_board("3월 독서감상문", description="A4 1장")
@@ -49,7 +49,7 @@ add_inquiry_question(code, "학생이름", "질문 내용", category="factual")
 
 CLI:
 ```bash
-python easyup_api.py inquiry "제목" --desc "설명"
+python eleup_api.py inquiry "제목" --desc "설명"
 ```
 
 ## 파일 구조
@@ -59,7 +59,7 @@ python easyup_api.py inquiry "제목" --desc "설명"
 | `index.html` | 메인 HTML (SPA) |
 | `style.css` | 스타일시트 |
 | `app.js` | Firebase 연동 및 앱 로직 |
-| `easyup_api.py` | Python API 유틸리티 |
+| `eleup_api.py` | Python API 유틸리티 |
 | `firestore.rules` | Firestore 보안 규칙 |
 | `storage.rules` | Storage 보안 규칙 |
 
