@@ -581,12 +581,15 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 .clb-page-num { color:rgba(255,255,255,.7); font-size:.85rem; min-width:60px; text-align:center; font-variant-numeric:tabular-nums; }
 
 /* PDF Download Button */
-.clb-download-pdf {
+.clb-pdf-btns {
   position:absolute; top:16px; right:68px; z-index:10;
+  display:flex; gap:6px;
+}
+.clb-download-pdf {
   background:rgba(255,255,255,.15); backdrop-filter:blur(8px);
   border:1px solid rgba(255,255,255,.2); border-radius:20px;
   padding:6px 16px; color:#fff; font-size:.8rem;
-  cursor:pointer; transition:all .2s;
+  cursor:pointer; transition:all .2s; white-space:nowrap;
 }
 .clb-download-pdf:hover { background:rgba(255,255,255,.3); }
 .clb-download-pdf:disabled { opacity:.4; cursor:not-allowed; }
@@ -645,6 +648,14 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
   margin-top:20px; font-size:1.05rem; color:#4a3728; font-weight:600;
   padding:8px 24px;
   border-top:1px solid #c4b5a0; border-bottom:1px solid #c4b5a0;
+}
+.clb-cover-participants {
+  display:flex; flex-wrap:wrap; justify-content:center; gap:6px 12px;
+  margin-top:12px; padding-top:12px; border-top:1px solid #d4c5b0;
+}
+.clb-cover-name {
+  font-size:.9rem; font-weight:600; color:#4a3728;
+  padding:2px 10px; background:rgba(212,197,176,.25); border-radius:12px;
 }
 .clb-cover-stats { font-size:.8rem; color:#9b8b7a; margin-top:8px; }
 
@@ -726,31 +737,27 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 .clb-section-stats { font-size:.8rem; color:#9b8b7a; }
 .clb-section-star { margin-top:4px; }
 
-/* ── Chapter (최상위 분류 — full spread) ── */
+/* ── Chapter (최상위 분류 — spread의 한쪽 페이지) ── */
 .clb-chapter {
-  width:min(960px, 95vw); min-height:min(600px, 80vh);
-  background:linear-gradient(170deg, #faf8f5 0%, #f5f1eb 100%);
-  border-radius:4px 12px 12px 4px;
-  box-shadow:-4px 0 8px rgba(0,0,0,.15), 4px 4px 20px rgba(0,0,0,.25);
   display:flex; flex-direction:column; align-items:center; justify-content:center;
-  padding:56px 48px; text-align:center; position:relative; overflow:hidden;
+  height:100%; padding:32px 20px; text-align:center; position:relative; overflow:hidden;
 }
 .clb-chapter-deco {
   position:absolute; left:60px; right:60px; height:3px; border-radius:2px; opacity:.6;
 }
 .clb-chapter-deco.top { top:40px; }
 .clb-chapter-deco.bottom { bottom:40px; }
-.clb-chapter-body { display:flex; flex-direction:column; align-items:center; gap:16px; max-width:600px; }
+.clb-chapter-body { display:flex; flex-direction:column; align-items:center; gap:12px; max-width:100%; }
 .clb-chapter-label {
   font-size:.85rem; letter-spacing:5px; text-transform:uppercase;
   color:#8b7355; font-weight:600;
 }
 .clb-chapter-title {
-  font-size:2.4rem; font-weight:800; color:#2c1810; line-height:1.3;
+  font-size:1.8rem; font-weight:800; color:#2c1810; line-height:1.3;
   word-break:keep-all; font-family:'Pretendard', serif;
 }
-.clb-chapter-desc { font-size:1rem; color:#6b5b4f; line-height:1.6; max-width:420px; }
-.clb-chapter-img { border-radius:10px; overflow:hidden; max-width:320px; max-height:200px; }
+.clb-chapter-desc { font-size:.95rem; color:#6b5b4f; line-height:1.6; max-width:320px; }
+.clb-chapter-img { border-radius:10px; overflow:hidden; max-width:240px; max-height:160px; }
 .clb-chapter-img img { width:100%; height:100%; object-fit:cover; }
 .clb-chapter-stats { font-size:.85rem; color:#9b8b7a; }
 
@@ -776,6 +783,22 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
   max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .clb-crumb-sep { color:#c4b5a0; font-size:.65rem; }
+
+/* ── Entry Image Page (이미지 전용 페이지) ── */
+.clb-entry-image-page {
+  display:flex; flex-direction:column; height:100%; padding:8px 0; gap:8px;
+}
+.clb-entry-image-full {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  border-radius:8px; overflow:hidden;
+}
+.clb-entry-image-full img {
+  max-width:100%; max-height:100%; object-fit:contain; border-radius:8px;
+}
+.clb-entry-image-caption {
+  text-align:center; font-size:.9rem; font-weight:600; color:#4a3728;
+  padding:4px 0; border-top:1px solid #e5ddd0;
+}
 
 /* ── Entry (사전 항목 — dictionary card) ── */
 .clb-entry {

@@ -3243,15 +3243,17 @@ function clBuildBreadcrumb() {
 //  CLASSIFY: BOOK VIEW (풀스크린 사전 프레젠테이션)
 // ══════════════════════════════════════
 
-/** Build book pages array: cover → toc → content spreads */
+/** Build book pages array: cover → toc → content spreads
+ *  Each spread = left page + right page. Each page = one card.
+ *  Top-level category: blank left + chapter divider right. */
 function clBuildBookPages() {
   const pages = [];
-  const categories = CL.tree; // top-level categories with children
+  const categories = CL.tree;
 
-  // Page 0: Cover
+  // Cover
   pages.push({ type: 'cover' });
 
-  // Page 1: Table of Contents — all categories flattened with depth
+  // TOC
   const tocItems = [];
   function collectTocItems(nodes, depth) {
     for (const node of nodes) {
@@ -3265,33 +3267,27 @@ function clBuildBookPages() {
   collectTocItems(categories, 0);
   pages.push({ type: 'toc', categories: tocItems });
 
-  // Content: categories → subsections → entries
-  // depth 0 = fullpage (양쪽 전체), depth 1+ = left page only (점진 축소)
+  // Collect all "sides" in order, then pair into spreads
+  const sides = [];
+
   function addCategoryPages(cat, depth) {
     const directEntries = (cat.children || []).filter(c => c.cardType !== 'category');
     const subCats = (cat.children || []).filter(c => c.cardType === 'category');
 
     if (depth === 0) {
-      // Top-level: full spread chapter page
-      pages.push({ type: 'chapter', card: cat, depth });
-      // Entries as pairs
-      for (let i = 0; i < directEntries.length; i += 2) {
-        const left = { type: 'entry', card: directEntries[i] };
-        const right = (i + 1 < directEntries.length) ? { type: 'entry', card: directEntries[i + 1] } : null;
-        pages.push({ type: 'spread', left, right });
-      }
+      // Top-level: blank left + chapter divider right
+      sides.push(null);
+      sides.push({ type: 'chapter', card: cat, depth });
     } else {
-      // Sub-level: section on left, first entry on right
-      const sectionSide = { type: 'section', card: cat, depth };
-      if (directEntries.length === 0) {
-        pages.push({ type: 'spread', left: sectionSide, right: null });
+      sides.push({ type: 'section', card: cat, depth });
+    }
+
+    for (const entry of directEntries) {
+      if (entry.imageUrl) {
+        sides.push({ type: 'entry-image', card: entry });
+        sides.push({ type: 'entry', card: entry });
       } else {
-        pages.push({ type: 'spread', left: sectionSide, right: { type: 'entry', card: directEntries[0] } });
-        for (let i = 1; i < directEntries.length; i += 2) {
-          const left = { type: 'entry', card: directEntries[i] };
-          const right = (i + 1 < directEntries.length) ? { type: 'entry', card: directEntries[i + 1] } : null;
-          pages.push({ type: 'spread', left, right });
-        }
+        sides.push({ type: 'entry', card: entry });
       }
     }
 
@@ -3304,7 +3300,14 @@ function clBuildBookPages() {
     addCategoryPages(cat, 0);
   }
 
-  // If no content at all, add an empty page
+  // Pair sides into spreads (left, right)
+  while (sides.length >= 2) {
+    pages.push({ type: 'spread', left: sides.shift(), right: sides.shift() });
+  }
+  if (sides.length === 1) {
+    pages.push({ type: 'spread', left: sides.shift(), right: null });
+  }
+
   if (pages.length <= 2) {
     pages.push({ type: 'spread', left: null, right: null });
   }
@@ -3332,7 +3335,10 @@ function clRenderBookView(containerId) {
         ${clRenderBookPage(pages[page], page, totalPages)}
       </div>
       <div class="clb-controls">
-        <button class="clb-download-pdf" title="PDF 다운로드">⬇ PDF</button>
+        <div class="clb-pdf-btns">
+          <button class="clb-download-pdf" data-mode="normal" title="PDF 다운로드">⬇ PDF</button>
+          <button class="clb-download-pdf" data-mode="booklet" title="소책자 PDF (접어서 제본)">⬇ 소책자</button>
+        </div>
         <button class="clb-close" title="닫기">✕</button>
         <div class="clb-nav">
           <button class="clb-prev" ${page <= 0 ? 'disabled' : ''}>‹</button>
@@ -3358,24 +3364,47 @@ function clRenderBookPage(pageData, pageIdx, totalPages) {
   if (pageData.type === 'cover') {
     const title = clGetWsTitle() || '사전';
     const desc = currentBoard?.description || '';
-    // Find workspace name
+    const settings = currentBoard?.settings || {};
+    const members = currentBoard?.members || {};
+    const groups = currentBoard?.groups || {};
+    // Collect workspace name and participant names
     let wsName = '';
+    const participantNames = [];
     if (CL.workspaceId) {
-      const settings = currentBoard?.settings || {};
       if (settings.groupMode === 'team') {
-        const groups = currentBoard?.groups || {};
         for (const [gid, g] of Object.entries(groups)) {
-          if (gid === CL.workspaceId) { wsName = g.name || gid; break; }
+          if (gid === CL.workspaceId) {
+            wsName = g.name || gid;
+            // Collect team member names
+            for (const [did, m] of Object.entries(members)) {
+              if (m.groupId === gid && m.name) participantNames.push(m.name);
+            }
+            break;
+          }
         }
       } else {
-        const members = currentBoard?.members || {};
         for (const [did, m] of Object.entries(members)) {
-          if (did === CL.workspaceId) { wsName = m.name || ''; break; }
+          if (did === CL.workspaceId) {
+            wsName = m.name || '';
+            if (m.name) participantNames.push(m.name);
+            break;
+          }
         }
       }
     }
+    // Also collect unique author names from cards as fallback
+    if (participantNames.length === 0) {
+      const nameSet = new Set();
+      for (const c of CL.cards) {
+        if (c.name && c.name.trim()) nameSet.add(c.name.trim());
+      }
+      participantNames.push(...nameSet);
+    }
     const cardCount = CL.cards.filter(c => c.cardType !== 'category').length;
     const catCount = CL.cards.filter(c => c.cardType === 'category').length;
+    const participantsHtml = participantNames.length > 0
+      ? `<div class="clb-cover-participants">${participantNames.map(n => `<span class="clb-cover-name">${escapeHtml(n)}</span>`).join('')}</div>`
+      : '';
 
     return `
       <div class="clb-cover">
@@ -3385,6 +3414,7 @@ function clRenderBookPage(pageData, pageIdx, totalPages) {
           <h1 class="clb-cover-title">${escapeHtml(title)}</h1>
           ${desc ? `<p class="clb-cover-desc">${escapeHtml(desc)}</p>` : ''}
           ${wsName ? `<div class="clb-cover-author">${escapeHtml(wsName)}</div>` : ''}
+          ${participantsHtml}
           <div class="clb-cover-stats">${catCount}개 분류 · ${cardCount}개 항목</div>
         </div>
         <div class="clb-cover-ornament bottom"></div>
@@ -3410,33 +3440,6 @@ function clRenderBookPage(pageData, pageIdx, totalPages) {
       <div class="clb-toc">
         <div class="clb-page-header">목 차</div>
         <div class="clb-toc-list">${tocHtml}</div>
-      </div>`;
-  }
-
-  if (pageData.type === 'chapter') {
-    // Full-spread chapter page for top-level categories
-    const card = pageData.card;
-    const color = card.color || CL_COLORS[Math.abs(hashStr(card.id)) % CL_COLORS.length];
-    const childCount = (card.children || []).filter(c => c.cardType !== 'category').length;
-    const subCatCount = (card.children || []).filter(c => c.cardType === 'category').length;
-    const starCount = (card.stars || []).length;
-    const isStarred = (card.stars || []).includes(deviceId);
-    return `
-      <div class="clb-chapter" style="--ch-color:${color}">
-        <div class="clb-chapter-deco top" style="background:${color}"></div>
-        <div class="clb-chapter-body">
-          <div class="clb-chapter-label">Chapter</div>
-          <h1 class="clb-chapter-title">${escapeHtml(card.title || '')}</h1>
-          ${card.content ? `<p class="clb-chapter-desc">${escapeHtml(card.content)}</p>` : ''}
-          ${card.imageUrl ? `<div class="clb-chapter-img"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
-          <div class="clb-chapter-stats">
-            ${childCount}개 항목${subCatCount > 0 ? ` · ${subCatCount}개 하위 분류` : ''}
-          </div>
-          <button class="cl-star-btn ${isStarred ? 'cl-starred' : ''}" data-id="${escapeHtml(card.id)}">
-            ${isStarred ? '★' : '☆'} ${starCount > 0 ? starCount : ''}
-          </button>
-        </div>
-        <div class="clb-chapter-deco bottom" style="background:${color}"></div>
       </div>`;
   }
 
@@ -3480,6 +3483,29 @@ function clRenderBookSide(side) {
   const starCount = (card.stars || []).length;
   const isStarred = (card.stars || []).includes(deviceId);
 
+  // Chapter divider (top-level category, right side of spread)
+  if (side.type === 'chapter') {
+    const childCount = (card.children || []).filter(c => c.cardType !== 'category').length;
+    const subCatCount = (card.children || []).filter(c => c.cardType === 'category').length;
+    return `
+      <div class="clb-chapter" style="--ch-color:${color}">
+        <div class="clb-chapter-deco top" style="background:${color}"></div>
+        <div class="clb-chapter-body">
+          <div class="clb-chapter-label">Chapter</div>
+          <h1 class="clb-chapter-title">${escapeHtml(card.title || '')}</h1>
+          ${card.content ? `<p class="clb-chapter-desc">${escapeHtml(card.content)}</p>` : ''}
+          ${card.imageUrl ? `<div class="clb-chapter-img"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
+          <div class="clb-chapter-stats">
+            ${childCount}개 항목${subCatCount > 0 ? ` · ${subCatCount}개 하위 분류` : ''}
+          </div>
+          <button class="cl-star-btn ${isStarred ? 'cl-starred' : ''}" data-id="${escapeHtml(card.id)}">
+            ${isStarred ? '★' : '☆'} ${starCount > 0 ? starCount : ''}
+          </button>
+        </div>
+        <div class="clb-chapter-deco bottom" style="background:${color}"></div>
+      </div>`;
+  }
+
   if (side.type === 'section') {
     // Sub-level category — depth-based progressive scaling
     const depth = side.depth || 1;
@@ -3510,14 +3536,26 @@ function clRenderBookSide(side) {
       </div>`;
   }
 
-  // Entry — dictionary-style card with quote/definition look
+  // Entry-image: full-page image display
+  if (side.type === 'entry-image') {
+    const breadcrumb = clBookBreadcrumb(card);
+    return `
+      <div class="clb-entry-image-page" style="--entry-color:${color}">
+        ${breadcrumb}
+        <div class="clb-entry-image-full">
+          <img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy">
+        </div>
+        <div class="clb-entry-image-caption">${escapeHtml(card.title || '')}</div>
+      </div>`;
+  }
+
+  // Entry — dictionary-style card with quote/definition look (no image, shown on paired page)
   const time = card.createdAt ? formatDateShort(card.createdAt.toDate()) : '';
   const breadcrumb = clBookBreadcrumb(card);
   return `
     <div class="clb-entry" data-id="${escapeHtml(card.id)}" data-type="${card.cardType}" style="--entry-color:${color}">
       ${breadcrumb}
       <div class="clb-entry-word">${escapeHtml(card.title || '')}</div>
-      ${card.imageUrl ? `<div class="clb-entry-img"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
       ${card.content ? `<div class="clb-entry-desc">${escapeHtml(card.content)}</div>` : ''}
       <div class="clb-entry-footer">
         <span class="clb-entry-author">${escapeHtml(card.name || '')}</span>
@@ -3605,7 +3643,8 @@ document.addEventListener('click', (e) => {
   if (!overlay) return;
 
   if (e.target.closest('.clb-close')) { clCloseBook(); return; }
-  if (e.target.closest('.clb-download-pdf')) { clBookDownloadPDF(); return; }
+  const pdfBtn = e.target.closest('.clb-download-pdf');
+  if (pdfBtn) { clBookDownloadPDF(pdfBtn.dataset.mode || 'normal'); return; }
   if (e.target.closest('.clb-prev')) { clBookNavigate(-1); return; }
   if (e.target.closest('.clb-next')) { clBookNavigate(1); return; }
 
@@ -3635,14 +3674,144 @@ document.addEventListener('click', (e) => {
 });
 
 // ── Book PDF Download ──
-const PDF_SIZES = {
-  cover:   { w: 520, h: 680 },
-  toc:     { w: 520, h: 680 },
-  chapter: { w: 960, h: 600 },
-  spread:  { w: 960, h: 600 },
-};
+// Uniform page size for PDF: all pages rendered at same size for consistency
+const PDF_W = 480, PDF_H = 640;
 
-async function clBookDownloadPDF() {
+/** Capture all book pages to canvas images */
+async function clCaptureBookPages(progressCb) {
+  const pages = CL.bookPages;
+  if (!pages || pages.length === 0) return null;
+
+  const renderBox = document.createElement('div');
+  renderBox.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;overflow:hidden;';
+  document.body.appendChild(renderBox);
+
+  const canvases = [];
+  let cancelled = false;
+  const cancel = () => { cancelled = true; };
+
+  for (let i = 0; i < pages.length; i++) {
+    if (cancelled) break;
+    const pageData = pages[i];
+    // Use uniform size; spread pages get wider render
+    const isWide = pageData.type === 'spread';
+    const w = isWide ? PDF_W * 2 : PDF_W;
+    const h = PDF_H;
+
+    renderBox.style.width = w + 'px';
+    renderBox.style.height = h + 'px';
+
+    const pageHtml = clRenderBookPage(pageData, i, pages.length);
+    renderBox.innerHTML = `<div style="width:${w}px;height:${h}px;overflow:hidden;display:flex;align-items:center;justify-content:center;">${pageHtml}</div>`;
+
+    renderBox.querySelectorAll('.cl-star-btn, .cl-node-menu-btn').forEach(el => el.remove());
+    renderBox.querySelectorAll('img').forEach(img => {
+      img.crossOrigin = 'anonymous';
+      const src = img.src; img.src = ''; img.src = src;
+    });
+    await clWaitForImages(renderBox);
+
+    const canvas = await window.html2canvas(renderBox.firstChild, {
+      useCORS: true, allowTaint: false, scale: 2, logging: false,
+      width: w, height: h, backgroundColor: null,
+    });
+    canvases.push({ canvas, w, h, type: pageData.type });
+
+    if (progressCb) cancelled = progressCb(i + 1, pages.length);
+    await new Promise(r => setTimeout(r, 30));
+  }
+
+  renderBox.remove();
+  return cancelled ? null : canvases;
+}
+
+/** Generate normal PDF from captured canvases */
+function clBuildNormalPDF(canvases) {
+  const { jsPDF } = window.jspdf;
+  let pdf = null;
+  for (let i = 0; i < canvases.length; i++) {
+    const { canvas, w, h } = canvases[i];
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    const orientation = w > h ? 'landscape' : 'portrait';
+    if (i === 0) {
+      pdf = new jsPDF({ orientation, unit: 'px', format: [w, h], hotfixes: ['px_scaling'] });
+    } else {
+      pdf.addPage([w, h], orientation);
+    }
+    pdf.addImage(imgData, 'JPEG', 0, 0, w, h);
+  }
+  return pdf;
+}
+
+/** Generate booklet PDF: pages arranged for fold-and-staple binding.
+ *  Landscape, short-edge flip double-sided printing.
+ *  Back sides are rotated 180° for correct reading when folded. */
+function clBuildBookletPDF(canvases) {
+  const { jsPDF } = window.jspdf;
+  // Flatten all canvases into single "half-pages"
+  const halves = [];
+  for (const c of canvases) {
+    if (c.w > c.h) {
+      halves.push({ canvas: c.canvas, sx: 0, sw: c.w / 2, sh: c.h });
+      halves.push({ canvas: c.canvas, sx: c.w / 2, sw: c.w / 2, sh: c.h });
+    } else {
+      halves.push({ canvas: c.canvas, sx: 0, sw: c.w, sh: c.h });
+    }
+  }
+
+  // Pad to multiple of 4
+  while (halves.length % 4 !== 0) {
+    halves.push(null);
+  }
+  const totalHalves = halves.length;
+  const sheetCount = totalHalves / 4;
+
+  const halfW = PDF_W;
+  const halfH = PDF_H;
+  const sheetW = halfW * 2;
+  const sheetH = halfH;
+  const s = 2; // html2canvas scale
+
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [sheetW, sheetH], hotfixes: ['px_scaling'] });
+
+  /** Draw a half-page to the PDF at destX. If rotated, flip 180°. */
+  function drawHalf(half, destX, rotate180) {
+    if (!half) return;
+    const tc = document.createElement('canvas');
+    tc.width = halfW * 2; tc.height = halfH * 2;
+    const ctx = tc.getContext('2d');
+    if (rotate180) {
+      ctx.translate(halfW * 2, halfH * 2);
+      ctx.rotate(Math.PI);
+    }
+    ctx.drawImage(half.canvas,
+      half.sx * s, 0, half.sw * s, half.sh * s,
+      0, 0, halfW * 2, halfH * 2
+    );
+    const imgData = tc.toDataURL('image/jpeg', 0.90);
+    pdf.addImage(imgData, 'JPEG', destX, 0, halfW, halfH);
+  }
+
+  for (let i = 0; i < sheetCount; i++) {
+    if (i > 0) pdf.addPage([sheetW, sheetH], 'landscape');
+    // Front side (normal): left=last pages, right=first pages
+    const frontLeft = 2 * i;
+    const frontRight = totalHalves - 1 - 2 * i;
+    drawHalf(halves[frontLeft], 0, false);
+    drawHalf(halves[frontRight], halfW, false);
+
+    // Back side: swapped + rotated 180° for short-edge flip
+    pdf.addPage([sheetW, sheetH], 'landscape');
+    const backLeft = totalHalves - 2 - 2 * i;
+    const backRight = 2 * i + 1;
+    drawHalf(halves[backLeft], 0, true);
+    drawHalf(halves[backRight], halfW, true);
+  }
+
+  return pdf;
+}
+
+async function clBookDownloadPDF(mode = 'normal') {
   if (!window.html2canvas || !window.jspdf) {
     toast('PDF 라이브러리를 로드 중입니다. 잠시 후 다시 시도해주세요.');
     return;
@@ -3653,15 +3822,15 @@ async function clBookDownloadPDF() {
   const overlay = document.getElementById('cl-book-overlay');
   if (!overlay) return;
 
-  // Disable download button
-  const dlBtn = overlay.querySelector('.clb-download-pdf');
-  if (dlBtn) { dlBtn.disabled = true; dlBtn.textContent = '생성 중...'; }
+  // Disable buttons
+  overlay.querySelectorAll('.clb-download-pdf').forEach(b => { b.disabled = true; });
 
   // Progress overlay
+  const label = mode === 'booklet' ? '소책자' : 'PDF';
   const progress = document.createElement('div');
   progress.className = 'clb-pdf-progress';
   progress.innerHTML = `
-    <div class="clb-pdf-progress-text">PDF 생성 중... (0/${pages.length})</div>
+    <div class="clb-pdf-progress-text">${label} 생성 중... (0/${pages.length})</div>
     <div class="clb-pdf-progress-bar"><div class="clb-pdf-progress-fill"></div></div>
     <button class="clb-pdf-cancel">취소</button>`;
   overlay.querySelector('.clb-container').appendChild(progress);
@@ -3669,90 +3838,34 @@ async function clBookDownloadPDF() {
   let cancelled = false;
   progress.querySelector('.clb-pdf-cancel').onclick = () => { cancelled = true; };
 
-  // Off-screen render container
-  const renderBox = document.createElement('div');
-  renderBox.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;overflow:hidden;';
-  document.body.appendChild(renderBox);
-
-  // Copy all stylesheets into render context (html2canvas uses computed styles)
-  const { jsPDF } = window.jspdf;
-  let pdf = null;
-
   try {
-    for (let i = 0; i < pages.length; i++) {
-      if (cancelled) break;
-
-      const pageData = pages[i];
-      const size = PDF_SIZES[pageData.type] || PDF_SIZES.spread;
-
-      // Set render container size
-      renderBox.style.width = size.w + 'px';
-      renderBox.style.height = size.h + 'px';
-
-      // Render page HTML
-      const pageHtml = clRenderBookPage(pageData, i, pages.length);
-      renderBox.innerHTML = `<div style="width:${size.w}px;height:${size.h}px;overflow:hidden;display:flex;align-items:center;justify-content:center;">${pageHtml}</div>`;
-
-      // Remove interactive elements
-      renderBox.querySelectorAll('.cl-star-btn, .cl-node-menu-btn').forEach(el => el.remove());
-
-      // Fix images for CORS
-      renderBox.querySelectorAll('img').forEach(img => {
-        img.crossOrigin = 'anonymous';
-        const src = img.src;
-        img.src = '';
-        img.src = src;
-      });
-
-      // Wait for images
-      await clWaitForImages(renderBox);
-
-      // Capture with html2canvas
-      const canvas = await window.html2canvas(renderBox.firstChild, {
-        useCORS: true,
-        allowTaint: false,
-        scale: 2,
-        logging: false,
-        width: size.w,
-        height: size.h,
-        backgroundColor: null,
-      });
-
-      const imgData = canvas.toDataURL('image/jpeg', 0.92);
-      const orientation = size.w > size.h ? 'landscape' : 'portrait';
-
-      if (i === 0) {
-        pdf = new jsPDF({ orientation, unit: 'px', format: [size.w, size.h], hotfixes: ['px_scaling'] });
-      } else {
-        pdf.addPage([size.w, size.h], orientation);
-      }
-      pdf.addImage(imgData, 'JPEG', 0, 0, size.w, size.h);
-
-      // Update progress
-      const pct = Math.round(((i + 1) / pages.length) * 100);
+    const canvases = await clCaptureBookPages((done, total) => {
+      const pct = Math.round((done / total) * 100);
       const textEl = progress.querySelector('.clb-pdf-progress-text');
       const fillEl = progress.querySelector('.clb-pdf-progress-fill');
-      if (textEl) textEl.textContent = `PDF 생성 중... (${i + 1}/${pages.length})`;
+      if (textEl) textEl.textContent = `${label} 생성 중... (${done}/${total})`;
       if (fillEl) fillEl.style.width = pct + '%';
+      return cancelled;
+    });
 
-      // Yield to event loop
-      await new Promise(r => setTimeout(r, 30));
-    }
-
-    if (!cancelled && pdf) {
+    if (canvases) {
+      const pdf = mode === 'booklet' ? clBuildBookletPDF(canvases) : clBuildNormalPDF(canvases);
       const title = (clGetWsTitle() || currentBoard?.title || '사전').replace(/[<>:"/\\|?*]/g, '_');
-      pdf.save(`${title}_사전.pdf`);
-      toast('PDF 다운로드 완료');
-    } else if (cancelled) {
-      toast('PDF 생성이 취소되었습니다.');
+      const suffix = mode === 'booklet' ? '_소책자' : '_사전';
+      pdf.save(`${title}${suffix}.pdf`);
+      toast(`${label} 다운로드 완료`);
+    } else {
+      toast(`${label} 생성이 취소되었습니다.`);
     }
   } catch (err) {
     console.error('PDF generation error:', err);
-    toast('PDF 생성 중 오류가 발생했습니다.');
+    toast(`${label} 생성 중 오류가 발생했습니다.`);
   } finally {
-    renderBox.remove();
     progress.remove();
-    if (dlBtn) { dlBtn.disabled = false; dlBtn.textContent = '⬇ PDF'; }
+    overlay.querySelectorAll('.clb-download-pdf').forEach(b => {
+      b.disabled = false;
+      b.textContent = b.dataset.mode === 'booklet' ? '⬇ 소책자' : '⬇ PDF';
+    });
   }
 }
 
