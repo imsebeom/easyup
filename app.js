@@ -3283,12 +3283,7 @@ function clBuildBookPages() {
     }
 
     for (const entry of directEntries) {
-      if (entry.imageUrl) {
-        sides.push({ type: 'entry-image', card: entry });
-        sides.push({ type: 'entry', card: entry });
-      } else {
-        sides.push({ type: 'entry', card: entry });
-      }
+      sides.push({ type: 'entry', card: entry });
     }
 
     for (const sc of subCats) {
@@ -3549,13 +3544,14 @@ function clRenderBookSide(side) {
       </div>`;
   }
 
-  // Entry — dictionary-style card with quote/definition look (no image, shown on paired page)
+  // Entry — dictionary-style card (image + text on one page)
   const time = card.createdAt ? formatDateShort(card.createdAt.toDate()) : '';
   const breadcrumb = clBookBreadcrumb(card);
   return `
     <div class="clb-entry" data-id="${escapeHtml(card.id)}" data-type="${card.cardType}" style="--entry-color:${color}">
       ${breadcrumb}
       <div class="clb-entry-word">${escapeHtml(card.title || '')}</div>
+      ${card.imageUrl ? `<div class="clb-entry-img"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
       ${card.content ? `<div class="clb-entry-desc">${escapeHtml(card.content)}</div>` : ''}
       <div class="clb-entry-footer">
         <span class="clb-entry-author">${escapeHtml(card.name || '')}</span>
