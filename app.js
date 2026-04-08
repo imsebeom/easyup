@@ -3770,16 +3770,11 @@ function clBuildBookletPDF(canvases) {
 
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [sheetW, sheetH], hotfixes: ['px_scaling'] });
 
-  /** Draw a half-page to the PDF at destX. If rotated, flip 180°. */
-  function drawHalf(half, destX, rotate180) {
+  function drawHalf(half, destX) {
     if (!half) return;
     const tc = document.createElement('canvas');
     tc.width = halfW * 2; tc.height = halfH * 2;
     const ctx = tc.getContext('2d');
-    if (rotate180) {
-      ctx.translate(halfW * 2, halfH * 2);
-      ctx.rotate(Math.PI);
-    }
     ctx.drawImage(half.canvas,
       half.sx * s, 0, half.sw * s, half.sh * s,
       0, 0, halfW * 2, halfH * 2
@@ -3788,22 +3783,18 @@ function clBuildBookletPDF(canvases) {
     pdf.addImage(imgData, 'JPEG', destX, 0, halfW, halfH);
   }
 
-  // Booklet imposition: fold right over left → right half = front cover
-  // Short-edge flip: back side rotated 180°, positions NOT swapped
+  // Standard booklet imposition (프린터에서 짧은쪽/긴쪽 넘김 선택)
+  // 접었을 때: right=앞표지, left=뒤표지
   for (let i = 0; i < sheetCount; i++) {
     if (i > 0) pdf.addPage([sheetW, sheetH], 'landscape');
-    // Front: left=끝쪽(뒤표지방향), right=앞쪽(앞표지방향)
-    const frontLeft = totalHalves - 1 - 2 * i;
-    const frontRight = 2 * i;
-    drawHalf(halves[frontLeft], 0, false);
-    drawHalf(halves[frontRight], halfW, false);
+    // 앞면: left=끝쪽, right=앞쪽
+    drawHalf(halves[totalHalves - 1 - 2 * i], 0);
+    drawHalf(halves[2 * i], halfW);
 
-    // Back: 짧은쪽 넘김 → 위치 유지 + 180° 회전
+    // 뒷면
     pdf.addPage([sheetW, sheetH], 'landscape');
-    const backLeft = totalHalves - 2 - 2 * i;
-    const backRight = 2 * i + 1;
-    drawHalf(halves[backLeft], 0, true);
-    drawHalf(halves[backRight], halfW, true);
+    drawHalf(halves[2 * i + 1], 0);
+    drawHalf(halves[totalHalves - 2 - 2 * i], halfW);
   }
 
   return pdf;
