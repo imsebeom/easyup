@@ -220,4 +220,7 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - 보고서: usage_report.py, functions/index.js 브랜드명 변경
   - localStorage 키(`easyup_*`)는 기존 학생 데이터 호환성 위해 유지
   - Firebase 프로젝트 ID(`easyup-1604e`)는 변경 불가 → 그대로 유지
+  - Google OAuth: firebase-config.js authDomain → eleup.kr로 변경
+  - Firebase Auth 승인 도메인에 eleup.kr 추가 (Identity Platform API)
+  - Google Cloud OAuth 클라이언트 리디렉션 URI에 `https://eleup.kr/__/auth/handler` 추가
 - [ ] 모바일 반응형 테스트
