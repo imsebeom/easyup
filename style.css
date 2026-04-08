@@ -814,6 +814,12 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 .clb-entry-author { font-weight:600; color:#6b5b4f; }
 .clb-entry-time { margin-left:auto; }
 
+/* ── Page Number ── */
+.clb-page-number {
+  position:absolute; bottom:10px; right:16px;
+  font-size:.7rem; color:#b8a68e; font-weight:500;
+}
+
 /* FAB */
 .cl-fab {
   position:fixed; bottom:30px; right:30px;

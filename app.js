@@ -3352,6 +3352,24 @@ function clRenderBookView(containerId) {
   CL._bookContainerId = containerId;
 }
 
+/** Calculate the half-page number for a given page index */
+function clGetHalfPageNums(pages, pageIdx) {
+  let num = 0;
+  for (let i = 0; i < pageIdx; i++) {
+    const p = pages[i];
+    num += (p.type === 'spread') ? 2 : 1;
+  }
+  const cur = pages[pageIdx];
+  if (cur.type === 'spread') return [num + 1, num + 2];
+  return [num + 1];
+}
+
+function clGetTotalHalfPages(pages) {
+  let n = 0;
+  for (const p of pages) n += (p.type === 'spread') ? 2 : 1;
+  return n;
+}
+
 /** Render a single book page content based on type */
 function clRenderBookPage(pageData, pageIdx, totalPages) {
   if (!pageData) return '';
@@ -3413,6 +3431,7 @@ function clRenderBookPage(pageData, pageIdx, totalPages) {
           <div class="clb-cover-stats">${catCount}개 분류 · ${cardCount}개 항목</div>
         </div>
         <div class="clb-cover-ornament bottom"></div>
+        <div class="clb-page-number">${pageIdx + 1}</div>
       </div>`;
   }
 
@@ -3435,15 +3454,19 @@ function clRenderBookPage(pageData, pageIdx, totalPages) {
       <div class="clb-toc">
         <div class="clb-page-header">목 차</div>
         <div class="clb-toc-list">${tocHtml}</div>
+        <div class="clb-page-number">${pageIdx + 1}</div>
       </div>`;
   }
 
   if (pageData.type === 'spread') {
+    const pages = CL.bookPages || [];
+    const nums = clGetHalfPageNums(pages, pageIdx);
+    const total = clGetTotalHalfPages(pages);
     return `
       <div class="clb-spread">
-        <div class="clb-left">${clRenderBookSide(pageData.left)}</div>
+        <div class="clb-left">${clRenderBookSide(pageData.left)}<div class="clb-page-number">${nums[0]}</div></div>
         <div class="clb-spine"></div>
-        <div class="clb-right">${clRenderBookSide(pageData.right)}</div>
+        <div class="clb-right">${clRenderBookSide(pageData.right)}<div class="clb-page-number">${nums[1]}</div></div>
       </div>`;
   }
 
@@ -3677,14 +3700,14 @@ document.addEventListener('click', (e) => {
 
 // ── Book Print (인쇄용 HTML 새 창) ──
 
-/** Render a single half-page HTML (cover, toc, or spread side) */
-function clRenderHalfPage(pageOrSide) {
-  if (!pageOrSide) return '';
+/** Render a single half-page HTML with page number */
+function clRenderHalfPage(pageOrSide, pageNum) {
+  const numHtml = pageNum ? `<div class="clb-page-number">${pageNum}</div>` : '';
+  if (!pageOrSide) return numHtml ? `<div style="position:relative;height:100%">${numHtml}</div>` : '';
   if (pageOrSide.type === 'cover' || pageOrSide.type === 'toc') {
-    return clRenderBookPage(pageOrSide, 0, 0);
+    return clRenderBookPage(pageOrSide, pageNum - 1, 0);
   }
-  // It's a spread side object (from clRenderBookSide)
-  return clRenderBookSide(pageOrSide);
+  return `<div style="position:relative;height:100%">${clRenderBookSide(pageOrSide)}${numHtml}</div>`;
 }
 
 /** Open print-ready HTML window: normal or booklet mode */
@@ -3694,48 +3717,48 @@ function clBookPrint(mode = 'normal', printWin) {
   if (!printWin) { printWin = window.open('', '_blank'); }
   if (!printWin) { toast('팝업이 차단되었습니다.'); return; }
 
-  // Flatten pages into individual half-pages
-  const halves = [];
+  // Flatten pages into individual half-pages with page numbers
+  const halves = []; // {side, num}
+  let num = 1;
   for (const page of pages) {
     if (page.type === 'cover' || page.type === 'toc') {
-      halves.push(page);
+      halves.push({ side: page, num: num++ });
     } else if (page.type === 'spread') {
-      halves.push(page.left);   // side object or null
-      halves.push(page.right);
+      halves.push({ side: page.left, num: num++ });
+      halves.push({ side: page.right, num: num++ });
     }
   }
+  const realCount = halves.length;
 
   const title = escapeHtml(clGetWsTitle() || currentBoard?.title || '사전');
   let bodyHtml = '';
 
   if (mode === 'booklet') {
     // Pad to multiple of 4
-    while (halves.length % 4 !== 0) halves.push(null);
+    while (halves.length % 4 !== 0) halves.push({ side: null, num: 0 });
     const total = halves.length;
     const sheetCount = total / 4;
 
+    const rh = (h) => clRenderHalfPage(h.side, h.num <= realCount ? h.num : 0);
     for (let i = 0; i < sheetCount; i++) {
-      // Front: left=last, right=first
       const fl = halves[total - 1 - 2 * i];
       const fr = halves[2 * i];
       bodyHtml += `<div class="print-sheet">
-        <div class="print-half">${clRenderHalfPage(fl)}</div>
+        <div class="print-half">${rh(fl)}</div>
         <div class="print-spine"></div>
-        <div class="print-half">${clRenderHalfPage(fr)}</div>
+        <div class="print-half">${rh(fr)}</div>
       </div>`;
-      // Back
       const bl = halves[2 * i + 1];
       const br = halves[total - 2 - 2 * i];
       bodyHtml += `<div class="print-sheet">
-        <div class="print-half">${clRenderHalfPage(bl)}</div>
+        <div class="print-half">${rh(bl)}</div>
         <div class="print-spine"></div>
-        <div class="print-half">${clRenderHalfPage(br)}</div>
+        <div class="print-half">${rh(br)}</div>
       </div>`;
     }
   } else {
-    // Normal: each half-page = one printed page
-    for (const half of halves) {
-      bodyHtml += `<div class="print-page">${clRenderHalfPage(half)}</div>`;
+    for (const h of halves) {
+      bodyHtml += `<div class="print-page">${clRenderHalfPage(h.side, h.num)}</div>`;
     }
   }
 
@@ -3786,6 +3809,8 @@ body { margin:0; padding:0; background:#fff; font-family:'Pretendard',sans-serif
 .clb-entry { flex:1; }
 .clb-entry-img img { max-height:180px; }
 .cl-star-btn { display:none !important; }
+.clb-page-number { position:absolute; bottom:8px; right:12px; font-size:.65rem; color:#b8a68e; }
+.print-half, .print-page { position:relative; }
 
 /* 플로팅 인쇄 버튼 */
 .print-fab {
