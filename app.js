@@ -3787,6 +3787,21 @@ body { margin:0; padding:0; background:#fff; font-family:'Pretendard',sans-serif
 .clb-entry-img img { max-height:180px; }
 .cl-star-btn { display:none !important; }
 
+/* 플로팅 인쇄 버튼 */
+.print-fab {
+  position:fixed; bottom:24px; right:24px; z-index:100;
+  display:flex; gap:8px;
+}
+.print-fab button {
+  padding:10px 20px; border:none; border-radius:24px;
+  font-size:.95rem; font-weight:600; cursor:pointer;
+  box-shadow:0 2px 8px rgba(0,0,0,.3);
+}
+.print-fab-print { background:#4A90D9; color:#fff; }
+.print-fab-print:hover { background:#3a7bc8; }
+.print-fab-close { background:#fff; color:#555; }
+.print-fab-close:hover { background:#f0f0f0; }
+
 /* 화면 미리보기용 (인쇄 전) */
 @media screen {
   body { background:#888; }
@@ -3796,8 +3811,14 @@ body { margin:0; padding:0; background:#fff; font-family:'Pretendard',sans-serif
     margin:10px auto; box-shadow:0 2px 12px rgba(0,0,0,.3);
   }
 }
+@media print { .print-fab { display:none !important; } }
 </style>
-</head><body>${bodyHtml}</body></html>`);
+</head><body>${bodyHtml}
+<div class="print-fab">
+  <button class="print-fab-close" onclick="window.close()">✕ 닫기</button>
+  <button class="print-fab-print" onclick="window.print()">🖨 인쇄</button>
+</div>
+</body></html>`);
   printWin.document.close();
 }
 
