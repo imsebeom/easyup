@@ -805,6 +805,7 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
   flex:1; word-break:break-word; white-space:pre-wrap;
   padding-left:4px;
   border-left:3px solid #e5ddd0;
+  display:flex; align-items:center;
 }
 .clb-entry-footer {
   display:flex; align-items:center; gap:8px; font-size:.75rem; color:#9b8b7a;
