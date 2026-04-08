@@ -597,7 +597,7 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 /* PDF Progress Overlay */
 /* ── Cover Page ── */
 .clb-cover {
-  width:min(520px, 90vw); min-height:min(680px, 85vh);
+  width:min(480px, 90vw); aspect-ratio:148/210;
   background:linear-gradient(170deg, #faf8f5 0%, #f4efe8 40%, #ece5d8 100%);
   border-radius:4px 12px 12px 4px;
   box-shadow:
@@ -605,7 +605,7 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
     4px 4px 20px rgba(0,0,0,.25),
     inset -2px 0 4px rgba(0,0,0,.05);
   display:flex; flex-direction:column; align-items:center; justify-content:center;
-  padding:48px 40px; position:relative; overflow:hidden; text-align:center;
+  padding:36px 28px; position:relative; overflow:hidden; text-align:center;
 }
 .clb-cover-ornament {
   position:absolute; left:40px; right:40px; height:2px;
@@ -649,14 +649,14 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 
 /* ── TOC Page ── */
 .clb-toc {
-  width:min(520px, 90vw); min-height:min(680px, 85vh);
+  width:min(480px, 90vw); aspect-ratio:148/210;
   background:linear-gradient(170deg, #faf8f5 0%, #f5f1eb 100%);
   border-radius:4px 12px 12px 4px;
   box-shadow:
     -4px 0 8px rgba(0,0,0,.15),
     4px 4px 20px rgba(0,0,0,.25),
     inset -2px 0 4px rgba(0,0,0,.05);
-  padding:48px 40px; position:relative;
+  padding:36px 28px; position:relative; overflow:hidden;
 }
 .clb-page-header {
   text-align:center; font-size:1.1rem; font-weight:700; color:#4a3728;
@@ -678,7 +678,7 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 
 /* ── Content Spread ── */
 .clb-spread {
-  width:min(960px, 95vw); min-height:min(600px, 80vh);
+  width:min(960px, 95vw); aspect-ratio:296/210;
   display:flex; border-radius:4px 12px 12px 4px;
   box-shadow:
     -4px 0 8px rgba(0,0,0,.15),
@@ -686,10 +686,9 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
   overflow:hidden;
 }
 .clb-left, .clb-right {
-  flex:1; padding:36px 32px;
+  flex:1; padding:24px 20px;
   background:linear-gradient(170deg, #faf8f5 0%, #f5f1eb 100%);
   display:flex; flex-direction:column; position:relative;
-  min-height:min(600px, 80vh);
 }
 .clb-left {
   border-radius:4px 0 0 4px;
@@ -795,12 +794,12 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 }
 .clb-entry-word {
   font-size:1.5rem; font-weight:800; color:#2c1810;
-  line-height:1.3; word-break:keep-all; flex:1;
+  line-height:1.3; word-break:keep-all;
   padding-bottom:8px;
   border-bottom:2px solid var(--entry-color, #6B7280);
 }
-.clb-entry-img { border-radius:8px; overflow:hidden; max-height:200px; }
-.clb-entry-img img { width:100%; height:auto; max-height:200px; object-fit:cover; display:block; }
+.clb-entry-img { border-radius:8px; overflow:hidden; flex:1; min-height:0; }
+.clb-entry-img img { width:100%; height:100%; object-fit:cover; display:block; }
 .clb-entry-desc {
   font-size:.95rem; color:#4a3728; line-height:1.8;
   flex:1; word-break:break-word; white-space:pre-wrap;
@@ -928,7 +927,7 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
   .clb-left { border-radius:4px 4px 0 0; box-shadow:inset 0 -1px 3px rgba(0,0,0,.06); }
   .clb-right { border-radius:0 0 4px 4px; }
   .clb-spine { width:100%; height:3px; background:linear-gradient(90deg, #d4c5b0, #9b8b7a, #d4c5b0); }
-  .clb-cover, .clb-toc, .clb-chapter { width:92vw; min-height:70vh; padding:32px 24px; }
+  .clb-cover, .clb-toc { width:92vw; padding:24px 16px; }
   .clb-cover-title { font-size:1.6rem; }
   .clb-chapter-title { font-size:1.6rem; }
   .clb-chapter-deco { left:24px; right:24px; }

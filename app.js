@@ -3795,17 +3795,17 @@ body { margin:0; padding:0; background:#fff; font-family:'Pretendard',sans-serif
   width:1px; flex-shrink:0; background:#d4c5b0;
 }
 
-/* 인쇄 시 book 뷰 스타일 재사용 — 크기 조정 */
+/* 인쇄 시 — 기본 book 뷰 스타일 재사용, 최소 오버라이드 */
 .clb-cover, .clb-toc, .clb-chapter, .clb-section,
 .clb-entry, .clb-entry-image-page, .clb-side-empty {
-  width:100% !important; min-height:0 !important; height:100%;
+  width:100% !important; height:100%;
   box-shadow:none !important; border-radius:0 !important;
+  aspect-ratio:auto !important;
 }
 .clb-spread { display:contents !important; }
 .clb-left, .clb-right, .clb-spine { display:none !important; }
 .clb-cover { display:flex; flex-direction:column; justify-content:center; align-items:center; }
 .clb-entry { flex:1; }
-.clb-entry-img img { max-height:180px; }
 .cl-star-btn { display:none !important; }
 .clb-page-number { position:absolute; bottom:8px; right:12px; font-size:.65rem; color:#b8a68e; }
 .print-half, .print-page { position:relative; }
