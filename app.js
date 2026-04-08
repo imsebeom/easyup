@@ -3331,8 +3331,8 @@ function clRenderBookView(containerId) {
       </div>
       <div class="clb-controls">
         <div class="clb-pdf-btns">
-          <button class="clb-download-pdf" data-mode="normal" title="PDF 다운로드">⬇ PDF</button>
-          <button class="clb-download-pdf" data-mode="booklet" title="소책자 PDF (접어서 제본)">⬇ 소책자</button>
+          <button class="clb-download-pdf" data-mode="normal" title="인쇄 / PDF 저장">🖨 인쇄</button>
+          <button class="clb-download-pdf" data-mode="booklet" title="소책자 인쇄 (접어서 제본)">📖 소책자</button>
         </div>
         <button class="clb-close" title="닫기">✕</button>
         <div class="clb-nav">
@@ -3640,7 +3640,13 @@ document.addEventListener('click', (e) => {
 
   if (e.target.closest('.clb-close')) { clCloseBook(); return; }
   const pdfBtn = e.target.closest('.clb-download-pdf');
-  if (pdfBtn) { clBookDownloadPDF(pdfBtn.dataset.mode || 'normal'); return; }
+  if (pdfBtn) {
+    // window.open must be called synchronously inside click handler
+    const printWin = window.open('', '_blank');
+    if (!printWin) { toast('팝업이 차단되었습니다. 팝업을 허용해주세요.'); return; }
+    clBookPrint(pdfBtn.dataset.mode || 'normal', printWin);
+    return;
+  }
   if (e.target.closest('.clb-prev')) { clBookNavigate(-1); return; }
   if (e.target.closest('.clb-next')) { clBookNavigate(1); return; }
 
@@ -3669,200 +3675,130 @@ document.addEventListener('click', (e) => {
   if (starBtn && starBtn.dataset.id) { clToggleStar(starBtn.dataset.id); return; }
 });
 
-// ── Book PDF Download ──
-// Uniform page size for PDF: all pages rendered at same size for consistency
-const PDF_W = 480, PDF_H = 640;
+// ── Book Print (인쇄용 HTML 새 창) ──
 
-/** Capture all book pages to canvas images */
-async function clCaptureBookPages(progressCb) {
-  const pages = CL.bookPages;
-  if (!pages || pages.length === 0) return null;
-
-  const renderBox = document.createElement('div');
-  renderBox.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;overflow:hidden;';
-  document.body.appendChild(renderBox);
-
-  const canvases = [];
-  let cancelled = false;
-  const cancel = () => { cancelled = true; };
-
-  for (let i = 0; i < pages.length; i++) {
-    if (cancelled) break;
-    const pageData = pages[i];
-    // Use uniform size; spread pages get wider render
-    const isWide = pageData.type === 'spread';
-    const w = isWide ? PDF_W * 2 : PDF_W;
-    const h = PDF_H;
-
-    renderBox.style.width = w + 'px';
-    renderBox.style.height = h + 'px';
-
-    const pageHtml = clRenderBookPage(pageData, i, pages.length);
-    renderBox.innerHTML = `<div style="width:${w}px;height:${h}px;overflow:hidden;display:flex;align-items:center;justify-content:center;">${pageHtml}</div>`;
-
-    renderBox.querySelectorAll('.cl-star-btn, .cl-node-menu-btn').forEach(el => el.remove());
-    await clWaitForImages(renderBox);
-
-    const canvas = await window.html2canvas(renderBox.firstChild, {
-      useCORS: true, allowTaint: true, scale: 1.5, logging: false,
-      width: w, height: h, backgroundColor: null,
-    });
-    canvases.push({ canvas, w, h, type: pageData.type });
-
-    if (progressCb) cancelled = progressCb(i + 1, pages.length);
+/** Render a single half-page HTML (cover, toc, or spread side) */
+function clRenderHalfPage(pageOrSide) {
+  if (!pageOrSide) return '';
+  if (pageOrSide.type === 'cover' || pageOrSide.type === 'toc') {
+    return clRenderBookPage(pageOrSide, 0, 0);
   }
-
-  renderBox.remove();
-  return cancelled ? null : canvases;
+  // It's a spread side object (from clRenderBookSide)
+  return clRenderBookSide(pageOrSide);
 }
 
-/** Generate normal PDF from captured canvases */
-function clBuildNormalPDF(canvases) {
-  const { jsPDF } = window.jspdf;
-  let pdf = null;
-  for (let i = 0; i < canvases.length; i++) {
-    const { canvas, w, h } = canvases[i];
-    const imgData = canvas.toDataURL('image/jpeg', 0.92);
-    const orientation = w > h ? 'landscape' : 'portrait';
-    if (i === 0) {
-      pdf = new jsPDF({ orientation, unit: 'px', format: [w, h], hotfixes: ['px_scaling'] });
-    } else {
-      pdf.addPage([w, h], orientation);
-    }
-    pdf.addImage(imgData, 'JPEG', 0, 0, w, h);
-  }
-  return pdf;
-}
-
-/** Generate booklet PDF: pages arranged for fold-and-staple binding.
- *  Landscape, short-edge flip double-sided printing.
- *  Back sides are rotated 180° for correct reading when folded. */
-function clBuildBookletPDF(canvases) {
-  const { jsPDF } = window.jspdf;
-  // Flatten all canvases into single "half-pages"
-  const halves = [];
-  for (const c of canvases) {
-    if (c.w > c.h) {
-      halves.push({ canvas: c.canvas, sx: 0, sw: c.w / 2, sh: c.h });
-      halves.push({ canvas: c.canvas, sx: c.w / 2, sw: c.w / 2, sh: c.h });
-    } else {
-      halves.push({ canvas: c.canvas, sx: 0, sw: c.w, sh: c.h });
-    }
-  }
-
-  // Pad to multiple of 4
-  while (halves.length % 4 !== 0) {
-    halves.push(null);
-  }
-  const totalHalves = halves.length;
-  const sheetCount = totalHalves / 4;
-
-  const halfW = PDF_W;
-  const halfH = PDF_H;
-  const sheetW = halfW * 2;
-  const sheetH = halfH;
-  const s = 1.5; // html2canvas scale
-
-  const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [sheetW, sheetH], hotfixes: ['px_scaling'] });
-
-  function drawHalf(half, destX) {
-    if (!half) return;
-    const tc = document.createElement('canvas');
-    tc.width = Math.round(halfW * s); tc.height = Math.round(halfH * s);
-    const ctx = tc.getContext('2d');
-    ctx.drawImage(half.canvas,
-      Math.round(half.sx * s), 0, Math.round(half.sw * s), Math.round(half.sh * s),
-      0, 0, tc.width, tc.height
-    );
-    const imgData = tc.toDataURL('image/jpeg', 0.90);
-    pdf.addImage(imgData, 'JPEG', destX, 0, halfW, halfH);
-  }
-
-  // Standard booklet imposition (프린터에서 짧은쪽/긴쪽 넘김 선택)
-  // 접었을 때: right=앞표지, left=뒤표지
-  for (let i = 0; i < sheetCount; i++) {
-    if (i > 0) pdf.addPage([sheetW, sheetH], 'landscape');
-    // 앞면: left=끝쪽, right=앞쪽
-    drawHalf(halves[totalHalves - 1 - 2 * i], 0);
-    drawHalf(halves[2 * i], halfW);
-
-    // 뒷면
-    pdf.addPage([sheetW, sheetH], 'landscape');
-    drawHalf(halves[2 * i + 1], 0);
-    drawHalf(halves[totalHalves - 2 - 2 * i], halfW);
-  }
-
-  return pdf;
-}
-
-async function clBookDownloadPDF(mode = 'normal') {
-  if (!window.html2canvas || !window.jspdf) {
-    toast('PDF 라이브러리를 로드 중입니다. 잠시 후 다시 시도해주세요.');
-    return;
-  }
+/** Open print-ready HTML window: normal or booklet mode */
+function clBookPrint(mode = 'normal', printWin) {
   const pages = CL.bookPages;
   if (!pages || pages.length === 0) { toast('페이지가 없습니다.'); return; }
+  if (!printWin) { printWin = window.open('', '_blank'); }
+  if (!printWin) { toast('팝업이 차단되었습니다.'); return; }
 
-  const overlay = document.getElementById('cl-book-overlay');
-  if (!overlay) return;
-
-  // Disable buttons
-  overlay.querySelectorAll('.clb-download-pdf').forEach(b => { b.disabled = true; });
-
-  // Progress overlay
-  const label = mode === 'booklet' ? '소책자' : 'PDF';
-  const progress = document.createElement('div');
-  progress.className = 'clb-pdf-progress';
-  progress.innerHTML = `
-    <div class="clb-pdf-progress-text">${label} 생성 중... (0/${pages.length})</div>
-    <div class="clb-pdf-progress-bar"><div class="clb-pdf-progress-fill"></div></div>
-    <button class="clb-pdf-cancel">취소</button>`;
-  overlay.querySelector('.clb-container').appendChild(progress);
-
-  let cancelled = false;
-  progress.querySelector('.clb-pdf-cancel').onclick = () => { cancelled = true; };
-
-  try {
-    const canvases = await clCaptureBookPages((done, total) => {
-      const pct = Math.round((done / total) * 100);
-      const textEl = progress.querySelector('.clb-pdf-progress-text');
-      const fillEl = progress.querySelector('.clb-pdf-progress-fill');
-      if (textEl) textEl.textContent = `${label} 생성 중... (${done}/${total})`;
-      if (fillEl) fillEl.style.width = pct + '%';
-      return cancelled;
-    });
-
-    if (canvases) {
-      const pdf = mode === 'booklet' ? clBuildBookletPDF(canvases) : clBuildNormalPDF(canvases);
-      const title = (clGetWsTitle() || currentBoard?.title || '사전').replace(/[<>:"/\\|?*]/g, '_');
-      const suffix = mode === 'booklet' ? '_소책자' : '_사전';
-      pdf.save(`${title}${suffix}.pdf`);
-      toast(`${label} 다운로드 완료`);
-    } else {
-      toast(`${label} 생성이 취소되었습니다.`);
+  // Flatten pages into individual half-pages
+  const halves = [];
+  for (const page of pages) {
+    if (page.type === 'cover' || page.type === 'toc') {
+      halves.push(page);
+    } else if (page.type === 'spread') {
+      halves.push(page.left);   // side object or null
+      halves.push(page.right);
     }
-  } catch (err) {
-    console.error('PDF generation error:', err);
-    toast(`${label} 생성 중 오류가 발생했습니다.`);
-  } finally {
-    progress.remove();
-    overlay.querySelectorAll('.clb-download-pdf').forEach(b => {
-      b.disabled = false;
-      b.textContent = b.dataset.mode === 'booklet' ? '⬇ 소책자' : '⬇ PDF';
-    });
   }
+
+  const title = escapeHtml(clGetWsTitle() || currentBoard?.title || '사전');
+  let bodyHtml = '';
+
+  if (mode === 'booklet') {
+    // Pad to multiple of 4
+    while (halves.length % 4 !== 0) halves.push(null);
+    const total = halves.length;
+    const sheetCount = total / 4;
+
+    for (let i = 0; i < sheetCount; i++) {
+      // Front: left=last, right=first
+      const fl = halves[total - 1 - 2 * i];
+      const fr = halves[2 * i];
+      bodyHtml += `<div class="print-sheet">
+        <div class="print-half">${clRenderHalfPage(fl)}</div>
+        <div class="print-spine"></div>
+        <div class="print-half">${clRenderHalfPage(fr)}</div>
+      </div>`;
+      // Back
+      const bl = halves[2 * i + 1];
+      const br = halves[total - 2 - 2 * i];
+      bodyHtml += `<div class="print-sheet">
+        <div class="print-half">${clRenderHalfPage(bl)}</div>
+        <div class="print-spine"></div>
+        <div class="print-half">${clRenderHalfPage(br)}</div>
+      </div>`;
+    }
+  } else {
+    // Normal: each half-page = one printed page
+    for (const half of halves) {
+      bodyHtml += `<div class="print-page">${clRenderHalfPage(half)}</div>`;
+    }
+  }
+
+  const isBooklet = mode === 'booklet';
+  printWin.document.write(`<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<title>${title} - ${isBooklet ? '소책자 인쇄' : '인쇄'}</title>
+<link rel="stylesheet" href="${location.origin}/style.css">
+<style>
+@page { margin: 0; size: ${isBooklet ? 'landscape' : 'portrait'}; }
+* { box-sizing: border-box; }
+body { margin:0; padding:0; background:#fff; font-family:'Pretendard',sans-serif; }
+
+/* 일반 모드: 한 쪽 한 페이지 */
+.print-page {
+  width:100vw; height:100vh;
+  padding:40px 36px; display:flex; flex-direction:column;
+  page-break-after:always; overflow:hidden;
+  background:linear-gradient(170deg, #faf8f5 0%, #f5f1eb 100%);
+}
+.print-page:last-child { page-break-after:auto; }
+
+/* 소책자 모드: 가로 2쪽 모아 */
+.print-sheet {
+  width:100vw; height:100vh;
+  display:flex; page-break-after:always; overflow:hidden;
+}
+.print-sheet:last-child { page-break-after:auto; }
+.print-half {
+  flex:1; padding:28px 24px; display:flex; flex-direction:column;
+  overflow:hidden;
+  background:linear-gradient(170deg, #faf8f5 0%, #f5f1eb 100%);
+}
+.print-spine {
+  width:1px; flex-shrink:0; background:#d4c5b0;
 }
 
-async function clWaitForImages(container, timeout = 3000) {
-  const imgs = container.querySelectorAll('img');
-  await Promise.all([...imgs].map(img =>
-    img.complete ? Promise.resolve() :
-    new Promise(resolve => {
-      const timer = setTimeout(resolve, timeout);
-      img.onload = () => { clearTimeout(timer); resolve(); };
-      img.onerror = () => { clearTimeout(timer); img.style.display = 'none'; resolve(); };
-    })
-  ));
+/* 인쇄 시 book 뷰 스타일 재사용 — 크기 조정 */
+.clb-cover, .clb-toc, .clb-chapter, .clb-section,
+.clb-entry, .clb-entry-image-page, .clb-side-empty {
+  width:100% !important; min-height:0 !important; height:100%;
+  box-shadow:none !important; border-radius:0 !important;
+}
+.clb-spread { display:contents !important; }
+.clb-left, .clb-right, .clb-spine { display:none !important; }
+.clb-cover { display:flex; flex-direction:column; justify-content:center; align-items:center; }
+.clb-entry { flex:1; }
+.clb-entry-img img { max-height:180px; }
+.cl-star-btn { display:none !important; }
+
+/* 화면 미리보기용 (인쇄 전) */
+@media screen {
+  body { background:#888; }
+  .print-page, .print-sheet {
+    width:${isBooklet ? '297mm' : '210mm'};
+    height:${isBooklet ? '210mm' : '297mm'};
+    margin:10px auto; box-shadow:0 2px 12px rgba(0,0,0,.3);
+  }
+}
+</style>
+</head><body>${bodyHtml}</body></html>`);
+  printWin.document.close();
 }
 
 // Book keyboard navigation
