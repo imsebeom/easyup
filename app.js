@@ -2655,11 +2655,17 @@ function clGetCardCountMap() {
   return map;
 }
 
-/** Get my groupId from board.members */
+/** Get my groupId from board.members or localStorage fallback */
 function clGetMyGroupId() {
   const members = currentBoard?.members || {};
   const me = members[deviceId];
-  return me?.groupId || '';
+  if (me?.groupId) return me.groupId;
+  // Fallback: check localStorage (set during name entry)
+  const saved = localStorage.getItem(`easyup_group_${currentBoardCode}`);
+  if (saved) return saved;
+  // Fallback: find from submissions
+  const myCard = CL.allCards.find(c => c.deviceId === deviceId && c.workspaceId);
+  return myCard?.workspaceId || '';
 }
 
 /** Render overview page (list of workspaces) */
@@ -2668,7 +2674,16 @@ function clRenderOverview(containerId) {
   if (!container) return;
   const settings = currentBoard?.settings || {};
   const mode = settings.groupMode || 'individual';
-  const members = currentBoard?.members || {};
+  const members = { ...(currentBoard?.members || {}) };
+
+  // Supplement members from submissions (catch students who bypassed normal entry)
+  CL.allCards.forEach(card => {
+    if (card.deviceId && card.name && !members[card.deviceId]) {
+      const memberData = { name: card.name };
+      if (mode === 'team' && card.workspaceId) memberData.groupId = card.workspaceId;
+      members[card.deviceId] = memberData;
+    }
+  });
   const memberEntries = Object.entries(members);
 
   // Update member count badge
@@ -2844,14 +2859,10 @@ function clSubscribe(containerId, isTeacher) {
       currentBoard.settings = data.settings || {};
       currentBoard.allowPeek = data.allowPeek;
       if (isTeacher) clUpdatePeekButton();
-      // Re-render overview if on overview page
+      // Re-render overview if on overview page (also updates member count badge)
       if (CL.currentPage === 'overview') {
         clRenderOverview(containerId);
       }
-      // Update member count
-      const memberCount = Object.keys(currentBoard.members || {}).length;
-      const memberCountEl = document.getElementById(isTeacher ? 'classify-board-member-count' : 'classify-gallery-member-count');
-      if (memberCountEl) memberCountEl.textContent = `👥 ${memberCount}명`;
       // Refresh group dropdown on member changes
       if (!isTeacher) {
         clPopulateGroupSelect();
@@ -3321,6 +3332,7 @@ function clRenderBookView(containerId) {
         ${clRenderBookPage(pages[page], page, totalPages)}
       </div>
       <div class="clb-controls">
+        <button class="clb-download-pdf" title="PDF 다운로드">⬇ PDF</button>
         <button class="clb-close" title="닫기">✕</button>
         <div class="clb-nav">
           <button class="clb-prev" ${page <= 0 ? 'disabled' : ''}>‹</button>
@@ -3593,6 +3605,7 @@ document.addEventListener('click', (e) => {
   if (!overlay) return;
 
   if (e.target.closest('.clb-close')) { clCloseBook(); return; }
+  if (e.target.closest('.clb-download-pdf')) { clBookDownloadPDF(); return; }
   if (e.target.closest('.clb-prev')) { clBookNavigate(-1); return; }
   if (e.target.closest('.clb-next')) { clBookNavigate(1); return; }
 
@@ -3620,6 +3633,140 @@ document.addEventListener('click', (e) => {
   const starBtn = e.target.closest('.cl-star-btn');
   if (starBtn && starBtn.dataset.id) { clToggleStar(starBtn.dataset.id); return; }
 });
+
+// ── Book PDF Download ──
+const PDF_SIZES = {
+  cover:   { w: 520, h: 680 },
+  toc:     { w: 520, h: 680 },
+  chapter: { w: 960, h: 600 },
+  spread:  { w: 960, h: 600 },
+};
+
+async function clBookDownloadPDF() {
+  if (!window.html2canvas || !window.jspdf) {
+    toast('PDF 라이브러리를 로드 중입니다. 잠시 후 다시 시도해주세요.');
+    return;
+  }
+  const pages = CL.bookPages;
+  if (!pages || pages.length === 0) { toast('페이지가 없습니다.'); return; }
+
+  const overlay = document.getElementById('cl-book-overlay');
+  if (!overlay) return;
+
+  // Disable download button
+  const dlBtn = overlay.querySelector('.clb-download-pdf');
+  if (dlBtn) { dlBtn.disabled = true; dlBtn.textContent = '생성 중...'; }
+
+  // Progress overlay
+  const progress = document.createElement('div');
+  progress.className = 'clb-pdf-progress';
+  progress.innerHTML = `
+    <div class="clb-pdf-progress-text">PDF 생성 중... (0/${pages.length})</div>
+    <div class="clb-pdf-progress-bar"><div class="clb-pdf-progress-fill"></div></div>
+    <button class="clb-pdf-cancel">취소</button>`;
+  overlay.querySelector('.clb-container').appendChild(progress);
+
+  let cancelled = false;
+  progress.querySelector('.clb-pdf-cancel').onclick = () => { cancelled = true; };
+
+  // Off-screen render container
+  const renderBox = document.createElement('div');
+  renderBox.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;overflow:hidden;';
+  document.body.appendChild(renderBox);
+
+  // Copy all stylesheets into render context (html2canvas uses computed styles)
+  const { jsPDF } = window.jspdf;
+  let pdf = null;
+
+  try {
+    for (let i = 0; i < pages.length; i++) {
+      if (cancelled) break;
+
+      const pageData = pages[i];
+      const size = PDF_SIZES[pageData.type] || PDF_SIZES.spread;
+
+      // Set render container size
+      renderBox.style.width = size.w + 'px';
+      renderBox.style.height = size.h + 'px';
+
+      // Render page HTML
+      const pageHtml = clRenderBookPage(pageData, i, pages.length);
+      renderBox.innerHTML = `<div style="width:${size.w}px;height:${size.h}px;overflow:hidden;display:flex;align-items:center;justify-content:center;">${pageHtml}</div>`;
+
+      // Remove interactive elements
+      renderBox.querySelectorAll('.cl-star-btn, .cl-node-menu-btn').forEach(el => el.remove());
+
+      // Fix images for CORS
+      renderBox.querySelectorAll('img').forEach(img => {
+        img.crossOrigin = 'anonymous';
+        const src = img.src;
+        img.src = '';
+        img.src = src;
+      });
+
+      // Wait for images
+      await clWaitForImages(renderBox);
+
+      // Capture with html2canvas
+      const canvas = await window.html2canvas(renderBox.firstChild, {
+        useCORS: true,
+        allowTaint: false,
+        scale: 2,
+        logging: false,
+        width: size.w,
+        height: size.h,
+        backgroundColor: null,
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      const orientation = size.w > size.h ? 'landscape' : 'portrait';
+
+      if (i === 0) {
+        pdf = new jsPDF({ orientation, unit: 'px', format: [size.w, size.h], hotfixes: ['px_scaling'] });
+      } else {
+        pdf.addPage([size.w, size.h], orientation);
+      }
+      pdf.addImage(imgData, 'JPEG', 0, 0, size.w, size.h);
+
+      // Update progress
+      const pct = Math.round(((i + 1) / pages.length) * 100);
+      const textEl = progress.querySelector('.clb-pdf-progress-text');
+      const fillEl = progress.querySelector('.clb-pdf-progress-fill');
+      if (textEl) textEl.textContent = `PDF 생성 중... (${i + 1}/${pages.length})`;
+      if (fillEl) fillEl.style.width = pct + '%';
+
+      // Yield to event loop
+      await new Promise(r => setTimeout(r, 30));
+    }
+
+    if (!cancelled && pdf) {
+      const title = (clGetWsTitle() || currentBoard?.title || '사전').replace(/[<>:"/\\|?*]/g, '_');
+      pdf.save(`${title}_사전.pdf`);
+      toast('PDF 다운로드 완료');
+    } else if (cancelled) {
+      toast('PDF 생성이 취소되었습니다.');
+    }
+  } catch (err) {
+    console.error('PDF generation error:', err);
+    toast('PDF 생성 중 오류가 발생했습니다.');
+  } finally {
+    renderBox.remove();
+    progress.remove();
+    if (dlBtn) { dlBtn.disabled = false; dlBtn.textContent = '⬇ PDF'; }
+  }
+}
+
+async function clWaitForImages(container, timeout = 5000) {
+  const imgs = container.querySelectorAll('img');
+  await Promise.all([...imgs].map(img =>
+    img.complete ? Promise.resolve() :
+    new Promise(resolve => {
+      const timer = setTimeout(resolve, timeout);
+      img.onload = () => { clearTimeout(timer); resolve(); };
+      img.onerror = () => { clearTimeout(timer); img.style.display = 'none'; resolve(); };
+    })
+  ));
+}
 
 // Book keyboard navigation
 document.addEventListener('keydown', (e) => {
@@ -4019,10 +4166,18 @@ const clUpdatePeekButton = updateAllPeekButtons;
 function clRenderMembersList() {
   const container = document.getElementById('cl-members-list');
   if (!container) return;
-  const members = currentBoard?.members || {};
+  const members = { ...(currentBoard?.members || {}) };
   const settings = currentBoard?.settings || {};
   const isTeam = settings.groupMode === 'team';
   const groups = currentBoard?.groups || {};
+  // Supplement members from submissions
+  CL.allCards.forEach(card => {
+    if (card.deviceId && card.name && !members[card.deviceId]) {
+      const memberData = { name: card.name };
+      if (isTeam && card.workspaceId) memberData.groupId = card.workspaceId;
+      members[card.deviceId] = memberData;
+    }
+  });
   const entries = Object.entries(members);
 
   if (entries.length === 0) {

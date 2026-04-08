@@ -580,6 +580,30 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 .clb-prev:disabled, .clb-next:disabled { opacity:.3; cursor:not-allowed; }
 .clb-page-num { color:rgba(255,255,255,.7); font-size:.85rem; min-width:60px; text-align:center; font-variant-numeric:tabular-nums; }
 
+/* PDF Download Button */
+.clb-download-pdf {
+  position:absolute; top:16px; right:68px; z-index:10;
+  background:rgba(255,255,255,.15); backdrop-filter:blur(8px);
+  border:1px solid rgba(255,255,255,.2); border-radius:20px;
+  padding:6px 16px; color:#fff; font-size:.8rem;
+  cursor:pointer; transition:all .2s;
+}
+.clb-download-pdf:hover { background:rgba(255,255,255,.3); }
+.clb-download-pdf:disabled { opacity:.4; cursor:not-allowed; }
+
+/* PDF Progress Overlay */
+.clb-pdf-progress {
+  position:absolute; inset:0; z-index:20;
+  background:rgba(0,0,0,.7); backdrop-filter:blur(4px);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:16px; color:#fff;
+}
+.clb-pdf-progress-text { font-size:1.1rem; }
+.clb-pdf-progress-bar { width:240px; height:6px; background:rgba(255,255,255,.2); border-radius:3px; overflow:hidden; }
+.clb-pdf-progress-fill { height:100%; background:#4ade80; border-radius:3px; transition:width .2s; width:0; }
+.clb-pdf-cancel { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.2); border-radius:16px; padding:6px 20px; color:#fff; font-size:.8rem; cursor:pointer; }
+.clb-pdf-cancel:hover { background:rgba(255,255,255,.3); }
+
 /* ── Cover Page ── */
 .clb-cover {
   width:min(520px, 90vw); min-height:min(680px, 85vh);
