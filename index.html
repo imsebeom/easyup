@@ -222,7 +222,20 @@
         </div>
       </header>
       <div id="inquiry-gallery-shelf" class="shelf-container"></div>
+      <button class="fab fab-secondary" onclick="openCategoryGuideModal()" style="right:auto;left:30px">📖 질문의 종류</button>
       <button class="fab" onclick="openInquirySubmitForm()">❓ 질문하기</button>
+    </div>
+
+    <!-- 질문의 종류 설명 모달 -->
+    <div id="category-guide-modal" class="modal" style="display:none">
+      <div class="modal-overlay" onclick="closeCategoryGuideModal()"></div>
+      <div class="modal-content" style="max-width:480px">
+        <div class="modal-header">
+          <h2>📖 질문의 종류</h2>
+          <button class="modal-close" onclick="closeCategoryGuideModal()">✕</button>
+        </div>
+        <div class="modal-body" id="category-guide-body"></div>
+      </div>
     </div>
 
     <!-- 학생: 분류하기 갤러리 (개요+트리+폴더 뷰) -->
@@ -283,22 +296,22 @@
 
     <!-- 교사: 질문판 보드뷰 -->
     <div id="inquiry-board-view" class="view">
-      <header class="sub-header">
-        <button class="btn-back" onclick="backToDashboard()">← 대시보드</button>
-        <h2 id="inquiry-board-title-display"></h2>
-        <div class="board-code-badge" id="inquiry-board-code-badge"></div>
-      </header>
-      <div id="inquiry-board-desc-display" class="board-desc"></div>
-      <div class="board-toolbar">
-        <span id="inquiry-submission-count" class="count-badge"></span>
-        <div class="toolbar-actions">
-          <button class="btn btn-small" id="inquiry-peek-toggle" onclick="togglePeekFromBoard()"></button>
-          <button class="btn btn-small" onclick="openEditBoardModal()">✏️ 수정</button>
-          <button class="btn btn-small" onclick="showBoardQr()">📱 QR 코드</button>
-          <button class="btn btn-small" onclick="copyBoardLink()">🔗 링크 복사</button>
-          <button class="btn btn-small btn-danger" onclick="deleteBoard()">🗑 보드 삭제</button>
+      <header class="gallery-header">
+        <div class="gallery-header-left">
+          <button class="btn-back" onclick="backToDashboard()" style="margin-right:8px">← 대시보드</button>
+          <h1 id="inquiry-board-title-display"></h1>
+          <p id="inquiry-board-desc-display" class="gallery-desc"></p>
         </div>
-      </div>
+        <div class="gallery-header-right">
+          <span id="inquiry-submission-count" class="count-badge"></span>
+          <span class="board-code-badge" id="inquiry-board-code-badge"></span>
+          <button class="btn btn-small" id="inquiry-peek-toggle" onclick="togglePeekFromBoard()"></button>
+          <button class="btn btn-small" onclick="openEditBoardModal()">✏️</button>
+          <button class="btn btn-small" onclick="showBoardQr()">📱</button>
+          <button class="btn btn-small" onclick="copyBoardLink()">🔗</button>
+          <button class="btn btn-small btn-danger" onclick="deleteBoard()">🗑</button>
+        </div>
+      </header>
       <div id="inquiry-board-shelf" class="shelf-container"></div>
     </div>
 
@@ -412,9 +425,14 @@
         <button class="btn-back" onclick="showView('dashboard-view')">← 대시보드</button>
         <h2>회원 관리</h2>
       </header>
+      <div class="users-tab-bar">
+        <button class="users-tab active" data-tab="active" onclick="switchUsersTab('active')">활성 회원</button>
+        <button class="users-tab" data-tab="rejected" onclick="switchUsersTab('rejected')">거부/취소 <span id="rejected-count-badge"></span></button>
+      </div>
       <div id="users-list" class="users-list">
         <div class="empty-state">로딩 중...</div>
       </div>
+      <div id="users-list-rejected" class="users-list" style="display:none"></div>
     </div>
 
     <!-- 교사: 보드 보기 -->
@@ -573,6 +591,7 @@
   <div id="cl-color-picker" class="cl-color-picker" style="display:none"></div>
 
   <div id="toast" class="toast"></div>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

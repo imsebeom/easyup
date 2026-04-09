@@ -299,8 +299,27 @@ function sanitizeUrl(url) {
 
 /** Build student join link for a board code */
 function getJoinLink(code) {
-  const origin = 'https://easyup-1604e.web.app';
+  const origin = location.origin;
   return `${origin}${location.pathname}#join/${code}`;
+}
+
+/** Build read-only book link for a classify workspace */
+function getBookLink(code, workspaceId) {
+  return `${location.origin}${location.pathname}#book/${code}/${workspaceId}`;
+}
+
+/** Generate QR code as data URL (synchronous, uses QRCode.js) */
+function clGenerateQrDataUrl(text, size = 100) {
+  const tmp = document.createElement('div');
+  tmp.style.cssText = 'position:absolute;left:-9999px;top:-9999px';
+  document.body.appendChild(tmp);
+  try {
+    new QRCode(tmp, { text, width: size, height: size, colorDark: '#1e293b', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+    const canvas = tmp.querySelector('canvas');
+    return canvas ? canvas.toDataURL('image/png') : '';
+  } finally {
+    document.body.removeChild(tmp);
+  }
 }
 
 /** Build submissions query for a board */
@@ -401,6 +420,11 @@ async function checkUserApproval(user) {
 // Student routes: handle immediately before auth (no flash of login screen)
 (function earlyStudentRoute() {
   const hash = location.hash.slice(1);
+  if (hash.startsWith('book/')) {
+    const parts = hash.split('/');
+    showReadOnlyBook(parts[1].toUpperCase(), parts[2] || '');
+    return;
+  }
   if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/') || hash.startsWith('classify/')) {
     handleStudentRoute(hash.split('/')[1].toUpperCase());
   }
@@ -410,8 +434,8 @@ onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   const hash = location.hash.slice(1);
 
-  // Student route: already handled by earlyStudentRoute or popstate
-  if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/') || hash.startsWith('classify/')) {
+  // Student/public routes: already handled by earlyStudentRoute or popstate
+  if (hash.startsWith('book/') || hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/') || hash.startsWith('classify/')) {
     return;
   }
 
@@ -470,10 +494,47 @@ async function loadUsers() {
     const snapshot = await getDocs(collection(db, 'users'));
     const users = snapshot.docs.map(d => ({ uid: d.id, ...d.data() }));
 
-    // Sort: pending first, then by date
+    // Load all boards for usage stats
+    const boardSnap = await getDocs(collection(db, 'boards'));
+    const boardsByOwner = {};
+    boardSnap.docs.forEach(d => {
+      const data = d.data();
+      const owner = data.ownerUid || '';
+      if (!boardsByOwner[owner]) boardsByOwner[owner] = [];
+      boardsByOwner[owner].push({ id: d.id, ...data });
+    });
+
+    // Count submissions + file sizes per user (parallel)
+    const usageMap = {};
+    const statPromises = [];
+    for (const [uid, boards] of Object.entries(boardsByOwner)) {
+      usageMap[uid] = { boards: boards.length, submissions: 0, storageBytes: 0 };
+      for (const b of boards) {
+        statPromises.push(
+          getDocs(collection(db, 'boards', b.id, 'submissions'))
+            .then(snap => {
+              usageMap[uid].submissions += snap.size;
+              snap.docs.forEach(d => {
+                const data = d.data();
+                // assignment files
+                if (data.files) data.files.forEach(f => { usageMap[uid].storageBytes += (f.size || 0); });
+                // classify images (estimate ~500KB if no size field)
+                if (data.imagePath && !data.files) usageMap[uid].storageBytes += 500000;
+              });
+            })
+            .catch(() => {})
+        );
+      }
+    }
+    await Promise.all(statPromises);
+
+    // Sort: pending first, then by usage (storage) descending
     users.sort((a, b) => {
-      const order = { pending: 0, approved: 1, admin: 2, rejected: 3 };
+      const order = { pending: 0, approved: 1, admin: 1, rejected: 2 };
       if (order[a.role] !== order[b.role]) return order[a.role] - order[b.role];
+      const aUsage = usageMap[a.uid]?.storageBytes || 0;
+      const bUsage = usageMap[b.uid]?.storageBytes || 0;
+      if (aUsage !== bUsage) return bUsage - aUsage;
       return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
     });
 
@@ -482,9 +543,18 @@ async function loadUsers() {
       return;
     }
 
-    container.innerHTML = users.map(u => {
+    const activeUsers = users.filter(u => u.role !== 'rejected');
+    const rejectedUsers = users.filter(u => u.role === 'rejected');
+
+    // Total stats
+    const totalBoards = boardSnap.docs.length;
+    const totalSubs = Object.values(usageMap).reduce((s, u) => s + u.submissions, 0);
+    const totalStorage = Object.values(usageMap).reduce((s, u) => s + u.storageBytes, 0);
+
+    function renderUserCard(u) {
       const date = u.createdAt ? new Date(u.createdAt.toMillis()).toLocaleDateString('ko-KR') : '';
       const isSelf = u.uid === currentUser.uid;
+      const usage = usageMap[u.uid];
 
       let actions = '';
       if (!isSelf) {
@@ -498,24 +568,55 @@ async function loadUsers() {
         }
       }
 
+      const usageHtml = usage
+        ? `<div class="user-usage">보드 <strong>${usage.boards}</strong> · 제출물 <strong>${usage.submissions}</strong> · ${formatSize(usage.storageBytes)}</div>`
+        : '<div class="user-usage">사용량 없음</div>';
+
       return `<div class="user-card">
         <div class="user-info">
           <span class="user-info-name" data-uid="${escapeHtml(u.uid)}">${escapeHtml(u.displayName || '(이름 없음)')}</span>
           <button class="btn-edit-name" data-uid="${escapeHtml(u.uid)}" data-name="${escapeHtml(u.displayName || '')}" title="이름 수정">✏️</button>
           <span class="user-info-email">${escapeHtml(u.email)}</span>
           <span class="user-info-date">${date}</span>
+          ${usageHtml}
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <span class="user-status ${ROLE_CLS[u.role] || ''}">${ROLE_LABEL[u.role] || u.role}</span>
           <div class="user-actions">${actions}</div>
         </div>
       </div>`;
-    }).join('');
+    }
+
+    const summaryHtml = `<div class="usage-summary">
+      <span>보드 <strong>${totalBoards}</strong></span>
+      <span>제출물 <strong>${totalSubs}</strong></span>
+      <span>Storage <strong>${formatSize(totalStorage)}</strong></span>
+      <span>교사 <strong>${activeUsers.filter(u => u.role === 'approved' || u.role === 'admin').length}</strong></span>
+      <a href="https://console.firebase.google.com/project/easyup-1604e/usage" target="_blank" class="usage-console-link">📊 트래픽·비용 (콘솔)</a>
+    </div>`;
+
+    container.innerHTML = summaryHtml + (activeUsers.length
+      ? activeUsers.map(renderUserCard).join('')
+      : '<div class="empty-state">활성 회원이 없습니다</div>');
+
+    const rejectedContainer = document.getElementById('users-list-rejected');
+    rejectedContainer.innerHTML = rejectedUsers.length
+      ? rejectedUsers.map(renderUserCard).join('')
+      : '<div class="empty-state">거부/취소된 회원이 없습니다</div>';
+
+    const badge = document.getElementById('rejected-count-badge');
+    badge.textContent = rejectedUsers.length > 0 ? rejectedUsers.length : '';
   } catch (e) {
     console.error(e);
     container.innerHTML = '<div class="empty-state">불러오기 실패</div>';
   }
 }
+
+window.switchUsersTab = function(tab) {
+  document.querySelectorAll('.users-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('users-list').style.display = tab === 'active' ? '' : 'none';
+  document.getElementById('users-list-rejected').style.display = tab === 'rejected' ? '' : 'none';
+};
 
 /** Helper: update user field and reload list */
 async function updateUser(uid, data, msg) {
@@ -526,8 +627,8 @@ async function updateUser(uid, data, msg) {
   } catch (e) { toast('처리 실패'); }
 }
 
-// Event delegation for user management
-document.getElementById('users-list').addEventListener('click', (e) => {
+// Event delegation for user management (covers both active + rejected lists)
+document.getElementById('users-view').addEventListener('click', (e) => {
   const editNameBtn = e.target.closest('.btn-edit-name');
   if (editNameBtn) {
     const newName = prompt('표시 이름 변경', editNameBtn.dataset.name);
@@ -552,6 +653,12 @@ document.getElementById('users-list').addEventListener('click', (e) => {
 /** Parse hash and navigate. Returns true if a route matched. */
 function handleRoute() {
   const hash = location.hash.slice(1);
+  // Read-only book route (no auth needed)
+  if (hash.startsWith('book/')) {
+    const parts = hash.split('/');
+    showReadOnlyBook(parts[1].toUpperCase(), parts[2] || '');
+    return true;
+  }
   // Student routes (no auth needed)
   if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/') || hash.startsWith('classify/')) {
     handleStudentRoute(hash.split('/')[1].toUpperCase());
@@ -569,6 +676,65 @@ function handleRoute() {
   if (hash === 'dashboard') { showView('dashboard-view'); loadMyBoards(); return true; }
   if (hash === 'users' && currentUserRole === 'admin') { showView('users-view'); return true; }
   return false;
+}
+
+/** Read-only book view: no login, no editing — just the book */
+async function showReadOnlyBook(code, workspaceId) {
+  try {
+    const boardDoc = await getDoc(doc(db, 'boards', code));
+    if (!boardDoc.exists()) { toast('존재하지 않는 코드입니다'); return; }
+    currentBoard = boardDoc.data();
+    currentBoard.code = code;
+    currentBoardCode = code;
+
+    // Load all submissions
+    const snap = await getDocs(query(collection(db, 'boards', code, 'submissions'), orderBy('createdAt', 'desc')));
+    CL.allCards = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    CL.workspaceId = workspaceId;
+    CL.currentPage = 'workspace';
+    CL.searchQuery = '';
+    CL.isTeacher = false;
+    clBuildTree();
+    clPreloadImages();
+
+    // Hide all views and render book overlay directly
+    document.querySelectorAll('.view').forEach(v => v.style.display = 'none');
+    document.getElementById('loading-view').style.display = 'none';
+
+    const pages = clBuildBookPages();
+    CL.bookPage = 0;
+    CL.bookPages = pages;
+
+    let overlay = document.getElementById('cl-book-overlay');
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.id = 'cl-book-overlay';
+    overlay.classList.add('clb-readonly');
+    overlay.innerHTML = `
+      <div class="clb-container">
+        <div class="clb-page-wrapper">
+          ${clRenderBookPage(pages[0], 0, pages.length)}
+        </div>
+        <div class="clb-controls">
+          <div class="clb-pdf-btns">
+            <button class="clb-download-pdf" data-mode="normal" title="인쇄 / PDF 저장">🖨 인쇄</button>
+            <button class="clb-download-pdf" data-mode="booklet" title="소책자 인쇄 (접어서 제본)">📖 소책자</button>
+          </div>
+          <div class="clb-nav">
+            <button class="clb-prev" disabled>‹</button>
+            <span class="clb-page-num">1 / ${pages.length}</span>
+            <button class="clb-next" ${pages.length <= 1 ? 'disabled' : ''}>›</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('clb-open'));
+    CL._bookParentView = null;
+    CL._bookContainerId = null;
+  } catch (e) {
+    console.error(e);
+    toast('책을 불러올 수 없습니다');
+  }
 }
 
 async function handleStudentRoute(code) {
@@ -2387,6 +2553,28 @@ window.selectInquiryCategory = function(cat) {
 
 window.closeInquirySubmitModal = function() { closeModal('inquiry-submit-modal'); };
 
+window.openCategoryGuideModal = function() {
+  const GUIDE = {
+    factual: { desc: '관찰하거나 조사하면 답을 찾을 수 있는 질문이에요.', ex: '"빛은 어떤 물질을 통과할 수 있을까?"' },
+    conceptual: { desc: '개념이나 원리를 이해하기 위한 질문이에요.', ex: '"빛이 꺾이는 이유는 무엇일까?"' },
+    debatable: { desc: '서로 다른 의견이 있을 수 있는 질문이에요.', ex: '"빛은 파동일까, 입자일까?"' },
+  };
+  const body = document.getElementById('category-guide-body');
+  body.innerHTML = STUDENT_CATEGORIES.map(cat => {
+    const cfg = INQUIRY_CATEGORIES[cat];
+    const g = GUIDE[cat] || {};
+    return `<div style="background:${cfg.color};border-radius:12px;padding:14px 16px;margin-bottom:10px">
+      <div style="font-size:1.1rem;font-weight:700;margin-bottom:4px">${cfg.icon} ${cfg.label}</div>
+      <div style="font-size:.9rem;color:#334155;margin-bottom:6px">${g.desc || ''}</div>
+      <div style="font-size:.85rem;color:#64748b;font-style:italic">예) ${g.ex || ''}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('category-guide-modal').style.display = 'flex';
+  openModalHistory();
+};
+
+window.closeCategoryGuideModal = function() { closeModal('category-guide-modal'); };
+
 window.submitInquiry = async function() {
   const content = document.getElementById('inquiry-question-input').value.trim();
   if (!content) { toast('질문 내용을 입력하세요'); return; }
@@ -2860,9 +3048,11 @@ function clSubscribe(containerId, isTeacher) {
       currentBoard.settings = data.settings || {};
       currentBoard.allowPeek = data.allowPeek;
       if (isTeacher) clUpdatePeekButton();
-      // Re-render overview if on overview page (also updates member count badge)
+      // Re-render current view to reflect member/group/wsTitle changes
       if (CL.currentPage === 'overview') {
         clRenderOverview(containerId);
+      } else {
+        clRenderCurrentView(containerId);
       }
       // Refresh group dropdown on member changes
       if (!isTeacher) {
@@ -3296,23 +3486,40 @@ function clBuildBookPages() {
     addCategoryPages(cat, 0);
   }
 
-  // Pair sides into spreads (left, right)
-  while (sides.length >= 2) {
-    pages.push({ type: 'spread', left: sides.shift(), right: sides.shift() });
-  }
-  if (sides.length === 1) {
-    pages.push({ type: 'spread', left: sides.shift(), right: null });
-  }
+  const isMobile = window.innerWidth <= 768;
 
-  if (pages.length <= 2) {
-    pages.push({ type: 'spread', left: null, right: null });
+  if (isMobile) {
+    // Mobile: one side per page
+    for (const side of sides) {
+      if (side) pages.push({ type: 'single', side });
+    }
+    if (pages.length <= 2) pages.push({ type: 'single', side: null });
+  } else {
+    // Desktop: pair sides into spreads (left, right)
+    while (sides.length >= 2) {
+      pages.push({ type: 'spread', left: sides.shift(), right: sides.shift() });
+    }
+    if (sides.length === 1) {
+      pages.push({ type: 'spread', left: sides.shift(), right: null });
+    }
+    if (pages.length <= 2) {
+      pages.push({ type: 'spread', left: null, right: null });
+    }
   }
 
   return pages;
 }
 
+/** Preload all card images in background */
+function clPreloadImages() {
+  for (const c of CL.cards) {
+    if (c.imageUrl) { const img = new Image(); img.src = c.imageUrl; }
+  }
+}
+
 /** Render the fullscreen book overlay */
 function clRenderBookView(containerId) {
+  clPreloadImages();
   // Remove existing overlay if any
   let overlay = document.getElementById('cl-book-overlay');
   if (overlay) overlay.remove();
@@ -3420,6 +3627,13 @@ function clRenderBookPage(pageData, pageIdx, totalPages) {
       ? `<div class="clb-cover-participants">${participantNames.map(n => `<span class="clb-cover-name">${escapeHtml(n)}</span>`).join('')}</div>`
       : '';
 
+    // QR code for read-only book link
+    const bookUrl = getBookLink(currentBoardCode, CL.workspaceId);
+    const qrDataUrl = clGenerateQrDataUrl(bookUrl, 100);
+    const qrHtml = qrDataUrl
+      ? `<div class="clb-cover-qr"><img src="${qrDataUrl}" alt="QR" width="72" height="72"><span>온라인으로 보기</span></div>`
+      : '';
+
     return `
       <div class="clb-cover">
         <div class="clb-cover-ornament top"></div>
@@ -3431,6 +3645,7 @@ function clRenderBookPage(pageData, pageIdx, totalPages) {
           ${participantsHtml}
           <div class="clb-cover-stats">${catCount}개 분류 · ${cardCount}개 항목</div>
         </div>
+        ${qrHtml}
         <div class="clb-cover-ornament bottom"></div>
         <div class="clb-page-number">${pageIdx + 1}</div>
       </div>`;
@@ -3468,6 +3683,14 @@ function clRenderBookPage(pageData, pageIdx, totalPages) {
         <div class="clb-left">${clRenderBookSide(pageData.left)}<div class="clb-page-number">${nums[0]}</div></div>
         <div class="clb-spine"></div>
         <div class="clb-right">${clRenderBookSide(pageData.right)}<div class="clb-page-number">${nums[1]}</div></div>
+      </div>`;
+  }
+
+  if (pageData.type === 'single') {
+    return `
+      <div class="clb-single">
+        ${clRenderBookSide(pageData.side)}
+        <div class="clb-page-number">${pageIdx + 1}</div>
       </div>`;
   }
 
@@ -3695,6 +3918,15 @@ document.addEventListener('click', (e) => {
   // Star button inside book
   const starBtn = e.target.closest('.cl-star-btn');
   if (starBtn && starBtn.dataset.id) { clToggleStar(starBtn.dataset.id); return; }
+
+  // Tap left/right half of page to navigate (mobile-friendly)
+  const pageWrapper = e.target.closest('.clb-page-wrapper');
+  if (pageWrapper && !e.target.closest('button, a, .clb-toc-item, .cl-star-btn')) {
+    const rect = pageWrapper.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    if (x < rect.width * 0.35) { clBookNavigate(-1); }
+    else if (x > rect.width * 0.65) { clBookNavigate(1); }
+  }
 });
 
 // ── Book Print (인쇄용 HTML 새 창) ──
@@ -3722,6 +3954,8 @@ function clBookPrint(mode = 'normal', printWin) {
   for (const page of pages) {
     if (page.type === 'cover' || page.type === 'toc') {
       halves.push({ side: page, num: num++ });
+    } else if (page.type === 'single') {
+      halves.push({ side: page.side, num: num++ });
     } else if (page.type === 'spread') {
       halves.push({ side: page.left, num: num++ });
       halves.push({ side: page.right, num: num++ });
