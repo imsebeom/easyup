@@ -269,4 +269,28 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - 정렬: pending 우선, 그 후 Storage 용량 내림차순
   - 탭 분리: 활성 회원 / 거부·취소 회원 (배지로 개수 표시)
   - 이벤트 위임을 `users-view`로 이동 (두 목록 모두 커버)
+- [x] 클래스(Class) 기능 — 교사별 weekly 캘린더 + 공개 URL
+  - 데이터: `classes/{alias}` + 서브컬렉션 `slots/{slotId}` (boardCode, weekStart, day, order, title, type 스냅샷)
+  - alias 규칙: 영문 소문자/숫자 4~20자, 중복 체크, 예약어 차단
+  - **경로 기반 URL**: `eleup.kr/mrkim` (학생 공개, 로그인 불필요) — Firebase SPA rewrite + `getClassAliasFromPath()` 파싱
+  - 교사 편집 URL: `eleup.kr/#class/alias`
+  - `getJoinLink`, `getBookLink`, `getTeacherLink`가 항상 `location.origin + '/'` 기반 (경로 섞임 방지)
+  - **날짜 기반 주차**: `weekStart` = 월요일 YYYY-MM-DD, 표시는 `4/6 ~ 4/10`
+    - `getMondayStr`, `shiftWeek`, `formatWeekLabel`, `getDateForDay` 유틸
+    - 주차 네비게이션 + "오늘" 버튼
+  - 교사 뷰: 월~금 5컬럼 그리드 + **테이블 모드 토글** (모든 주차 한눈에)
+  - 학생 뷰: 교사와 동일한 월~금 그리드, 오늘 요일 컬럼 파란색 하이라이트
+  - 보드 배치 모달: 여러 요일 체크박스 동시 배치, 주차 선택 (현재 ± 몇 주 범위)
+  - 클래스 CRUD: 생성/편집/삭제 (삭제 시 슬롯 일괄 삭제)
+  - **보드 뷰 "🗓 클래스 배치" 드롭다운**: 과제/탐구/분류하기 3가지 보드 뷰 모두에 추가
+    - 해당 보드가 배치된 모든 클래스 × 주차 × 요일 목록
+    - 각 항목 ✕ 버튼으로 배치 즉시 제거 → 목록 갱신
+- [x] 회원별 Storage 정렬, 거부 회원 탭 분리 완료
+- [x] 클래스 코드 품질 개선 (/simplify)
+  - `BOARD_TYPE_ICON` 상수 + `boardIcon()` 헬퍼 (4곳의 삼중 삼항 통합)
+  - `renderWeekGrid()` 공유 헬퍼 (교사/학생 주간 그리드 통합)
+  - `showClassStudent` 리스너 cleanup 수정 (`unsubscribeClassDoc`도 정리)
+  - dead `class-student-day-tabs` HTML/CSS 제거
+  - click 핸들러 2개 → 1개 통합 + 다중 드롭다운 닫기 버그 수정
+  - `copyClassStudentLink` / `copyClassStudentLinkByAlias` 통합
 - [ ] 모바일 반응형 테스트
