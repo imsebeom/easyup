@@ -271,7 +271,7 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - 이벤트 위임을 `users-view`로 이동 (두 목록 모두 커버)
 - [x] 클래스(Class) 기능 — 교사별 weekly 캘린더 + 공개 URL
   - 데이터: `classes/{alias}` + 서브컬렉션 `slots/{slotId}` (boardCode, weekStart, day, order, title, type 스냅샷)
-  - alias 규칙: 영문 소문자/숫자 4~20자, 중복 체크, 예약어 차단
+  - alias 규칙: 영문 소문자/숫자 2~20자, 중복 체크, 예약어 차단
   - **경로 기반 URL**: `eleup.kr/mrkim` (학생 공개, 로그인 불필요) — Firebase SPA rewrite + `getClassAliasFromPath()` 파싱
   - 교사 편집 URL: `eleup.kr/#class/alias`
   - `getJoinLink`, `getBookLink`, `getTeacherLink`가 항상 `location.origin + '/'` 기반 (경로 섞임 방지)
@@ -293,4 +293,28 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - dead `class-student-day-tabs` HTML/CSS 제거
   - click 핸들러 2개 → 1개 통합 + 다중 드롭다운 닫기 버그 수정
   - `copyClassStudentLink` / `copyClassStudentLinkByAlias` 통합
+- [x] 클래스 alias 길이 제한 완화 (4~20 → 2~20)
+  - path 라우팅 정규식이 4자 미만을 매칭하지 못해 `eleup.kr/51a` 같은 3자 alias가 교사 대시보드로 빠지는 버그 수정
+  - `getClassAliasFromPath`, `createClass` 정규식 + UI 안내 문구 동기화
+- [x] 클래스 접속 코드(alias) 수정 기능
+  - 클래스 수정 모달에 "접속 코드(URL)" 입력 필드 + 실시간 프리뷰
+  - Firestore doc ID는 변경 불가 → 새 doc + slots 복사 후 기존 doc 삭제 방식
+  - 중복 검사, 예약어 차단, 변경 후 `#class/{newAlias}`로 재진입
+- [x] 보드 뷰 "🗓 클래스 배치" 드롭다운 → 조회·삭제 + **배치 추가** 기능
+  - 드롭다운 하단에 "+ 새 배치" 폼 (클래스 select + 날짜 피커 1개)
+  - 달력에서 날짜 선택 → 자동으로 `weekStart`/`day` 변환 (월~금만 허용)
+  - 드롭다운 내부 클릭 시 닫히지 않도록 이벤트 위임 수정
+- [x] 클래스 관리 페이지 — 드래그 이동 + 날짜별 (+) 버튼
+  - 슬롯 카드 `draggable` → 월~금 다른 요일로 드롭 시 `day`/`weekStart` 즉시 업데이트
+  - 요일 헤더 우측에 원형 (+) 버튼 → 해당 요일/주차가 프리셋된 배치 모달 오픈
+  - FAB(+ 보드 배치) 제거
+  - 배치 모달에 "기존 보드 / + 새 보드 만들기" 탭 추가, `createQuickBoard()` 헬퍼로 기본 설정 신규 보드 생성 + 즉시 배치
+- [x] 교사 대시보드 — 보드 → 클래스 드래그 배치
+  - 보드 카드 `draggable` + 클래스 카드 dropzone
+  - 드롭 시 작은 `quick-place-modal` 오픈 (보드·클래스 요약 + 날짜 피커)
+  - `application/eleup-board` MIME으로 payload 전달 (code/title/type)
+- [x] 교사 대시보드 레이아웃 고정 + compact 클래스 행
+  - `#dashboard-view.active`를 `position:fixed` + flex column → 뷰포트 전체, 전역 스크롤 차단
+  - "내 클래스" 섹션 고정(`flex:0`), 카드 한 줄 수평 배치(`class-cards-compact`)
+  - "내 보드" 섹션만 `overflow-y:auto`로 스크롤
 - [ ] 모바일 반응형 테스트

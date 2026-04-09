@@ -467,7 +467,7 @@ async function checkUserApproval(user) {
 /** Extract class alias from path-based URL (e.g. /mrkim → 'mrkim'). Returns null if not matched. */
 function getClassAliasFromPath() {
   const path = location.pathname.replace(/^\/|\/$/g, '');
-  if (/^[a-z0-9]{4,20}$/.test(path)) return path;
+  if (/^[a-z0-9]{2,20}$/.test(path)) return path;
   return null;
 }
 
@@ -1643,15 +1643,16 @@ async function loadMyClasses() {
       <div class="class-card" data-alias="${escapeHtml(c.alias)}">
         <div class="class-card-main">
           <h3>${escapeHtml(c.title || '')}</h3>
-          <div class="class-card-alias">/${escapeHtml(c.alias)}</div>
-          ${c.description ? `<p class="class-card-desc">${escapeHtml(c.description)}</p>` : ''}
+          <span class="class-card-alias">/${escapeHtml(c.alias)}</span>
         </div>
         <div class="class-card-actions">
           <button class="btn btn-sm btn-primary" onclick="location.hash='class/${escapeHtml(c.alias)}'">열기</button>
-          <button class="btn btn-sm btn-secondary" onclick="copyClassStudentLink('${escapeHtml(c.alias)}')">🔗 학생 링크</button>
+          <button class="btn btn-sm btn-secondary" onclick="copyClassStudentLink('${escapeHtml(c.alias)}')">🔗</button>
         </div>
+        <div class="class-card-drop-hint">보드 놓기</div>
       </div>
     `).join('');
+    setupDashboardClassDrop(container);
   } catch (e) {
     console.error(e);
     container.innerHTML = '<div class="empty-state">불러오기 실패</div>';
@@ -1679,7 +1680,7 @@ window.createClass = async function() {
   const alias = document.getElementById('new-class-alias').value.trim().toLowerCase();
   const description = document.getElementById('new-class-desc').value.trim();
   if (!title) { toast('제목을 입력하세요'); return; }
-  if (!alias || !/^[a-z0-9]{4,20}$/.test(alias)) { toast('주소는 영문 소문자/숫자 4~20자'); return; }
+  if (!alias || !/^[a-z0-9]{2,20}$/.test(alias)) { toast('주소는 영문 소문자/숫자 2~20자'); return; }
   const reserved = ['admin', 'dashboard', 'class', 'users', 'join', 'gallery', 'inquiry', 'classify', 'book', 'index', 'api', 'static', 'assets', 'public', 'app', 'auth', 'login', 'logout', 'signup', 'signin', 'about', 'help', 'settings'];
   if (reserved.includes(alias)) { toast('사용할 수 없는 주소입니다'); return; }
 
@@ -1765,7 +1766,7 @@ function renderWeekGrid(container, weekStart, allSlots, isTeacher) {
     const slots = slotsThisWeek.filter(s => s.day === day).sort((a, b) => (a.order || 0) - (b.order || 0));
     const slotsHtml = slots.length
       ? slots.map(s => isTeacher
-        ? `<div class="class-slot-card" data-type="${s.type || ''}">
+        ? `<div class="class-slot-card" data-type="${s.type || ''}" data-slot-id="${escapeHtml(s.id)}" draggable="true">
             <div class="class-slot-icon">${boardIcon(s.type)}</div>
             <div class="class-slot-title">${escapeHtml(s.title || s.boardCode)}</div>
             <div class="class-slot-actions">
@@ -1779,11 +1780,72 @@ function renderWeekGrid(container, weekStart, allSlots, isTeacher) {
           </a>`
       ).join('')
       : '<div class="class-slot-empty">비어있음</div>';
-    return `<div class="class-day-col ${day === today ? 'class-day-today' : ''}">
-      <div class="class-day-header">${DAY_LABEL[day]} <span class="class-day-date">${getDateForDay(weekStart, day)}</span></div>
-      <div class="class-day-body">${slotsHtml}</div>
+    const headerRight = isTeacher
+      ? `<button class="class-day-add" data-day="${day}" data-week="${weekStart}" title="이 날짜에 보드 배치">+</button>`
+      : '';
+    return `<div class="class-day-col ${day === today ? 'class-day-today' : ''}" data-day="${day}" data-week="${weekStart}">
+      <div class="class-day-header">
+        <span>${DAY_LABEL[day]} <span class="class-day-date">${getDateForDay(weekStart, day)}</span></span>
+        ${headerRight}
+      </div>
+      <div class="class-day-body" data-day="${day}" data-week="${weekStart}">${slotsHtml}</div>
     </div>`;
   }).join('');
+  if (isTeacher) {
+    setupClassSlotDnd(container);
+    container.querySelectorAll('.class-day-add').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openPlaceBoardModal(btn.dataset.day, btn.dataset.week);
+      });
+    });
+  }
+}
+
+/** Enable HTML5 drag-and-drop for slot cards within a class grid container. */
+function setupClassSlotDnd(container) {
+  let dragEl = null;
+  container.querySelectorAll('.class-slot-card[draggable="true"]').forEach(card => {
+    card.addEventListener('dragstart', (e) => {
+      dragEl = card;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', card.dataset.slotId);
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      container.querySelectorAll('.class-day-body.drop-hover').forEach(el => el.classList.remove('drop-hover'));
+      dragEl = null;
+    });
+  });
+  container.querySelectorAll('.class-day-body').forEach(body => {
+    body.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      container.querySelectorAll('.class-day-body.drop-hover').forEach(el => el.classList.remove('drop-hover'));
+      body.classList.add('drop-hover');
+    });
+    body.addEventListener('dragleave', (e) => {
+      if (e.target === body) body.classList.remove('drop-hover');
+    });
+    body.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      body.classList.remove('drop-hover');
+      const slotId = e.dataTransfer.getData('text/plain');
+      const newDay = body.dataset.day;
+      const newWeek = body.dataset.week;
+      if (!slotId || !newDay || !newWeek || !currentClassAlias) return;
+      const slot = currentClassSlots.find(s => s.id === slotId);
+      if (!slot) return;
+      if (slot.day === newDay && slot.weekStart === newWeek) return; // no-op
+      try {
+        await updateDoc(doc(db, 'classes', currentClassAlias, 'slots', slotId), {
+          day: newDay, weekStart: newWeek, order: Date.now()
+        });
+      } catch (err) { console.error(err); toast('이동 실패'); }
+    });
+  });
 }
 
 window.classWeekPrev = function() {
@@ -1864,6 +1926,13 @@ window.openEditClassModal = function() {
   if (!currentClass) return;
   document.getElementById('edit-class-title').value = currentClass.title || '';
   document.getElementById('edit-class-desc').value = currentClass.description || '';
+  const aliasInput = document.getElementById('edit-class-alias');
+  aliasInput.value = currentClassAlias || '';
+  document.getElementById('edit-alias-preview').textContent = currentClassAlias || 'mrkim';
+  aliasInput.oninput = () => {
+    aliasInput.value = aliasInput.value.toLowerCase().replace(/[^a-z0-9]/g, '');
+    document.getElementById('edit-alias-preview').textContent = aliasInput.value || 'mrkim';
+  };
   document.getElementById('edit-class-modal').style.display = 'flex';
   openModalHistory();
 };
@@ -1871,12 +1940,50 @@ window.closeEditClassModal = function() { closeModal('edit-class-modal'); };
 window.saveEditClass = async function() {
   const title = document.getElementById('edit-class-title').value.trim();
   const description = document.getElementById('edit-class-desc').value.trim();
+  const newAlias = document.getElementById('edit-class-alias').value.trim().toLowerCase();
   if (!title) { toast('제목을 입력하세요'); return; }
+  if (!newAlias || !/^[a-z0-9]{2,20}$/.test(newAlias)) { toast('주소는 영문 소문자/숫자 2~20자'); return; }
+  const reserved = ['admin', 'dashboard', 'class', 'users', 'join', 'gallery', 'inquiry', 'classify', 'book', 'index', 'api', 'static', 'assets', 'public', 'app', 'auth', 'login', 'logout', 'signup', 'signin', 'about', 'help', 'settings'];
+  if (reserved.includes(newAlias)) { toast('사용할 수 없는 주소입니다'); return; }
+
   try {
-    await updateDoc(doc(db, 'classes', currentClassAlias), { title, description });
+    // Alias 변경 없음 → 제목/설명만 업데이트
+    if (newAlias === currentClassAlias) {
+      await updateDoc(doc(db, 'classes', currentClassAlias), { title, description });
+      toast('저장됨');
+      closeModal('edit-class-modal');
+      return;
+    }
+
+    // Alias 변경: 새 doc에 중복 검사
+    const existing = await getDoc(doc(db, 'classes', newAlias));
+    if (existing.exists()) { toast('이미 사용 중인 주소입니다'); return; }
+
+    // 기존 슬롯 전부 로드
+    const slotsSnap = await getDocs(collection(db, 'classes', currentClassAlias, 'slots'));
+    const slots = slotsSnap.docs.map(d => ({ id: d.id, data: d.data() }));
+
+    // 새 alias로 doc + slots 생성
+    await setDoc(doc(db, 'classes', newAlias), {
+      ...currentClass,
+      alias: newAlias,
+      title,
+      description,
+    });
+    await Promise.all(slots.map(s => setDoc(doc(db, 'classes', newAlias, 'slots', s.id), s.data)));
+
+    // 기존 doc + slots 삭제
+    await Promise.all(slots.map(s => deleteDoc(doc(db, 'classes', currentClassAlias, 'slots', s.id))));
+    await deleteDoc(doc(db, 'classes', currentClassAlias));
+
     toast('저장됨');
     closeModal('edit-class-modal');
-  } catch (e) { toast('실패'); }
+
+    // 새 alias 로 재진입 (리스너 재구독)
+    if (unsubscribeClassSlots) { unsubscribeClassSlots(); unsubscribeClassSlots = null; }
+    if (unsubscribeClassDoc) { unsubscribeClassDoc(); unsubscribeClassDoc = null; }
+    location.hash = `class/${newAlias}`;
+  } catch (e) { console.error(e); toast('실패: ' + e.message); }
 };
 
 window.deleteClass = async function() {
@@ -1901,17 +2008,20 @@ window.copyClassStudentLink = function(alias) {
   toast('학생 링크 복사됨');
 };
 
-window.openPlaceBoardModal = async function() {
+window.openPlaceBoardModal = async function(presetDay, presetWeek) {
   if (!currentClass) return;
   // Populate week select: current week ± 4 weeks
   const weekSelect = document.getElementById('place-week-select');
+  const baseWeek = presetWeek || currentClassWeekStart;
   const weeks = [];
-  for (let i = -2; i <= 8; i++) weeks.push(shiftWeek(currentClassWeekStart, i));
+  for (let i = -2; i <= 8; i++) weeks.push(shiftWeek(baseWeek, i));
   weekSelect.innerHTML = weeks.map(w =>
-    `<option value="${w}" ${w === currentClassWeekStart ? 'selected' : ''}>${formatWeekLabel(w)}</option>`
+    `<option value="${w}" ${w === baseWeek ? 'selected' : ''}>${formatWeekLabel(w)}</option>`
   ).join('');
-  // Reset day checkboxes
-  document.querySelectorAll('#place-day-select input[type=checkbox]').forEach(cb => cb.checked = false);
+  // Reset day checkboxes, preset single day if provided
+  document.querySelectorAll('#place-day-select input[type=checkbox]').forEach(cb => {
+    cb.checked = presetDay ? (cb.value === presetDay) : false;
+  });
 
   // Load teacher's boards
   const list = document.getElementById('place-board-list');
@@ -1933,20 +2043,71 @@ window.openPlaceBoardModal = async function() {
       `).join('');
     }
   } catch (e) { list.innerHTML = '<div class="empty-state">불러오기 실패</div>'; }
+  // Reset new-board fields and default tab to existing
+  document.getElementById('place-new-title').value = '';
+  document.getElementById('place-new-desc').value = '';
+  const firstType = document.querySelector('input[name="place-new-type"][value="assignment"]');
+  if (firstType) firstType.checked = true;
+  switchPlaceTab('existing');
   document.getElementById('place-board-modal').style.display = 'flex';
   openModalHistory();
 };
 window.closePlaceBoardModal = function() { closeModal('place-board-modal'); };
 
+window.switchPlaceTab = function(tab) {
+  document.querySelectorAll('.place-tab').forEach(b => b.classList.toggle('active', b.dataset.ptab === tab));
+  document.getElementById('place-tab-existing').style.display = tab === 'existing' ? '' : 'none';
+  document.getElementById('place-tab-new').style.display = tab === 'new' ? '' : 'none';
+};
+
+/** Create a new board with default settings for the given type. Returns {code, title, type}. */
+async function createQuickBoard(type, title, description) {
+  const code = generateCode();
+  const boardData = {
+    title, description: description || '', deadline: null,
+    type,
+    code, ownerUid: currentUser.uid, ownerName: currentUser.displayName || currentUser.email,
+    status: 'active', hidden: false,
+    createdAt: serverTimestamp()
+  };
+  if (type === 'assignment') {
+    Object.assign(boardData, { allowUrl: true, allowText: true, allowFile: true });
+  } else if (type === 'inquiry') {
+    boardData.categories = Object.keys(INQUIRY_CATEGORIES);
+  } else if (type === 'classify') {
+    boardData.settings = { groupMode: 'individual' };
+    boardData.members = {};
+  }
+  await setDoc(doc(db, 'boards', code), boardData);
+  return { code, title, type };
+}
+
 window.confirmPlaceBoard = async function() {
-  const selected = document.querySelector('#place-board-list input[name=place-board]:checked');
-  if (!selected) { toast('보드를 선택하세요'); return; }
+  const activeTab = document.querySelector('.place-tab.active')?.dataset.ptab || 'existing';
   const days = Array.from(document.querySelectorAll('#place-day-select input[type=checkbox]:checked')).map(cb => cb.value);
   if (days.length === 0) { toast('요일을 선택하세요'); return; }
   const weekStart = document.getElementById('place-week-select').value;
-  const boardCode = selected.value;
-  const boardTitle = selected.dataset.title;
-  const boardType = selected.dataset.type;
+
+  let boardCode, boardTitle, boardType;
+
+  if (activeTab === 'new') {
+    const newTitle = document.getElementById('place-new-title').value.trim();
+    if (!newTitle) { toast('새 보드 제목을 입력하세요'); return; }
+    const newType = document.querySelector('input[name="place-new-type"]:checked')?.value || 'assignment';
+    const newDesc = document.getElementById('place-new-desc').value.trim();
+    try {
+      const created = await createQuickBoard(newType, newTitle, newDesc);
+      boardCode = created.code;
+      boardTitle = created.title;
+      boardType = created.type;
+    } catch (e) { console.error(e); toast('보드 생성 실패'); return; }
+  } else {
+    const selected = document.querySelector('#place-board-list input[name=place-board]:checked');
+    if (!selected) { toast('보드를 선택하세요'); return; }
+    boardCode = selected.value;
+    boardTitle = selected.dataset.title;
+    boardType = selected.dataset.type;
+  }
 
   try {
     await Promise.all(days.map(day => {
@@ -2085,7 +2246,7 @@ function renderDashboard() {
     else statusBadge = '<span class="badge badge-active">진행중</span>';
     const statusBtnLabel = isPrivate ? '재시작' : isClosed ? '비공개' : '마감';
 
-    return `<div class="board-card" data-code="${escapeHtml(b.code)}">
+    return `<div class="board-card" data-code="${escapeHtml(b.code)}" data-title="${escapeHtml(b.title)}" data-type="${escapeHtml(b.type || 'assignment')}" draggable="true">
       <div class="board-card-header">
         <h3>${escapeHtml(b.title)}</h3>
         ${statusBadge}
@@ -2109,6 +2270,102 @@ function renderDashboard() {
       </div>
     </div>`;
   }).join('');
+  setupDashboardBoardDrag(container);
+}
+
+/** Enable dragging board cards from dashboard onto class cards. */
+function setupDashboardBoardDrag(container) {
+  container.querySelectorAll('.board-card[draggable="true"]').forEach(card => {
+    card.addEventListener('dragstart', (e) => {
+      const payload = JSON.stringify({
+        code: card.dataset.code,
+        title: card.dataset.title,
+        type: card.dataset.type || 'assignment'
+      });
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('application/eleup-board', payload);
+      e.dataTransfer.setData('text/plain', payload);
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      document.querySelectorAll('.class-card.drop-hover').forEach(el => el.classList.remove('drop-hover'));
+    });
+  });
+}
+
+let quickPlaceContext = null;
+
+window.openQuickPlaceModal = async function({ boardCode, boardTitle, boardType, classAlias }) {
+  quickPlaceContext = { boardCode, boardTitle, boardType, classAlias, classTitle: '' };
+  try {
+    const snap = await getDoc(doc(db, 'classes', classAlias));
+    quickPlaceContext.classTitle = snap.exists() ? (snap.data().title || classAlias) : classAlias;
+  } catch { quickPlaceContext.classTitle = classAlias; }
+  document.getElementById('qp-board-title').textContent = boardTitle || boardCode;
+  document.getElementById('qp-class-title').textContent = quickPlaceContext.classTitle;
+  document.getElementById('qp-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('quick-place-modal').style.display = 'flex';
+  openModalHistory();
+};
+
+window.closeQuickPlaceModal = function() {
+  closeModal('quick-place-modal');
+  quickPlaceContext = null;
+};
+
+window.confirmQuickPlace = async function() {
+  if (!quickPlaceContext) return;
+  const { boardCode, boardTitle, boardType, classAlias } = quickPlaceContext;
+  const dateStr = document.getElementById('qp-date').value;
+  if (!dateStr) { toast('날짜를 선택하세요'); return; }
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const picked = new Date(y, m - 1, d);
+  const dow = picked.getDay();
+  if (dow === 0 || dow === 6) { toast('월~금 중에서 선택해주세요'); return; }
+  const day = DAY_KEYS[dow - 1];
+  const weekStart = getMondayStr(picked);
+  try {
+    const slotId = `${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`;
+    await setDoc(doc(db, 'classes', classAlias, 'slots', slotId), {
+      boardCode, weekStart, day, order: Date.now(),
+      title: boardTitle, type: boardType || 'assignment',
+      createdAt: serverTimestamp()
+    });
+    toast('배치됨');
+    closeQuickPlaceModal();
+  } catch (e) { console.error(e); toast('배치 실패'); }
+};
+
+/** Attach drop listeners to class cards so teachers can drag boards onto a class. */
+function setupDashboardClassDrop(container) {
+  container.querySelectorAll('.class-card').forEach(card => {
+    card.addEventListener('dragover', (e) => {
+      const types = e.dataTransfer?.types || [];
+      if (!types.includes('application/eleup-board') && !types.includes('text/plain')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      card.classList.add('drop-hover');
+    });
+    card.addEventListener('dragleave', (e) => {
+      if (e.target === card) card.classList.remove('drop-hover');
+    });
+    card.addEventListener('drop', (e) => {
+      e.preventDefault();
+      card.classList.remove('drop-hover');
+      const raw = e.dataTransfer.getData('application/eleup-board') || e.dataTransfer.getData('text/plain');
+      if (!raw) return;
+      let data;
+      try { data = JSON.parse(raw); } catch { return; }
+      if (!data?.code) return;
+      openQuickPlaceModal({
+        boardCode: data.code,
+        boardTitle: data.title,
+        boardType: data.type,
+        classAlias: card.dataset.alias
+      });
+    });
+  });
 }
 
 // Event delegation for dashboard cards (XSS-safe)
@@ -2400,19 +2657,20 @@ async function loadBoardPlacements(boardCode) {
   if (!currentUser) return;
   try {
     const classSnap = await getDocs(query(collection(db, 'classes'), where('ownerUid', '==', currentUser.uid)));
+    const classList = classSnap.docs.map(d => ({ alias: d.id, ...d.data() }));
     const placements = [];
-    await Promise.all(classSnap.docs.map(async (cDoc) => {
-      const cData = cDoc.data();
-      const slotsSnap = await getDocs(query(collection(db, 'classes', cDoc.id, 'slots'), where('boardCode', '==', boardCode)));
+    await Promise.all(classList.map(async (c) => {
+      const slotsSnap = await getDocs(query(collection(db, 'classes', c.alias, 'slots'), where('boardCode', '==', boardCode)));
       slotsSnap.docs.forEach(sDoc => {
         const s = sDoc.data();
-        placements.push({ slotId: sDoc.id, classAlias: cDoc.id, classTitle: cData.title, weekStart: s.weekStart, day: s.day });
+        placements.push({ slotId: sDoc.id, classAlias: c.alias, classTitle: c.title, weekStart: s.weekStart, day: s.day });
       });
     }));
 
     placements.sort((a, b) => (a.classTitle || '').localeCompare(b.classTitle || '') || (a.weekStart || '').localeCompare(b.weekStart || ''));
     const countLabel = placements.length === 0 ? '(없음)' : `(${placements.length})`;
-    const dropdownHtml = placements.length === 0
+
+    const placementsHtml = placements.length === 0
       ? '<div class="empty-state" style="padding:12px">이 보드는 어느 클래스에도 배치되지 않았습니다</div>'
       : placements.map(p => `
         <div class="board-placement-item">
@@ -2423,6 +2681,33 @@ async function loadBoardPlacements(boardCode) {
           <button class="board-placement-del" data-alias="${escapeHtml(p.classAlias)}" data-slot="${escapeHtml(p.slotId)}" title="이 배치 제거">✕</button>
         </div>
       `).join('');
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    const addFormHtml = classList.length === 0
+      ? '<div class="empty-state" style="padding:12px">배치할 클래스가 없습니다. 먼저 클래스를 만들어주세요.</div>'
+      : `
+        <div class="board-placement-add">
+          <div class="board-placement-add-title">+ 새 배치</div>
+          <div class="board-placement-add-row">
+            <label>클래스</label>
+            <select class="bp-class-select">
+              ${classList.map(c => `<option value="${escapeHtml(c.alias)}">${escapeHtml(c.title || c.alias)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="board-placement-add-row">
+            <label>날짜</label>
+            <input type="date" class="bp-date-input" value="${todayStr}">
+          </div>
+          <button class="btn btn-primary btn-small bp-add-btn" data-board="${escapeHtml(boardCode)}">배치 추가</button>
+        </div>
+      `;
+
+    const dropdownHtml = `
+      <div class="board-placements-list">${placementsHtml}</div>
+      ${addFormHtml}
+    `;
+
     wraps.forEach(w => {
       const count = w.querySelector('.placements-count');
       if (count) count.textContent = countLabel;
@@ -2455,6 +2740,38 @@ document.addEventListener('click', async (e) => {
     } catch (err) { toast('제거 실패'); }
     return;
   }
+  // Add placement button
+  const addBtn = e.target.closest('.bp-add-btn');
+  if (addBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const boardCode = addBtn.dataset.board;
+    const form = addBtn.closest('.board-placement-add');
+    const alias = form.querySelector('.bp-class-select').value;
+    const dateStr = form.querySelector('.bp-date-input').value;
+    if (!alias || !dateStr) { toast('클래스/날짜를 선택하세요'); return; }
+    if (!currentBoard) { toast('보드 정보 없음'); return; }
+    // Parse date as local (avoid UTC shift)
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const picked = new Date(y, m - 1, d);
+    const dow = picked.getDay(); // Sun=0..Sat=6
+    if (dow === 0 || dow === 6) { toast('월~금 중에서 선택해주세요'); return; }
+    const day = DAY_KEYS[dow - 1];
+    const weekStart = getMondayStr(picked);
+    try {
+      const slotId = `${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`;
+      await setDoc(doc(db, 'classes', alias, 'slots', slotId), {
+        boardCode, weekStart, day, order: Date.now(),
+        title: currentBoard.title, type: currentBoard.type || 'assignment',
+        createdAt: serverTimestamp()
+      });
+      toast('배치됨');
+      loadBoardPlacements(boardCode);
+    } catch (err) { console.error(err); toast('배치 실패'); }
+    return;
+  }
+  // Clicks inside the dropdown (select, checkbox, labels) should not close it
+  if (e.target.closest('.board-placements-dropdown')) return;
   // Close any open placement dropdowns when clicking outside
   if (!e.target.closest('.board-placements-wrap')) {
     document.querySelectorAll('.board-placements-dropdown').forEach(d => d.style.display = 'none');
