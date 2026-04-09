@@ -229,10 +229,44 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - 변경: `Authorization: Bearer {gcloud_token}` (서버 모드, IAM 권한으로 보안 규칙 우회)
   - `gcloud auth print-access-token` (shell=True), ~1시간 캐싱
   - `FIREBASE_API_KEY` 환경변수 불필요해짐
-- [x] eleup.kr SSL 인증서 이슈 대응
+- [x] eleup.kr SSL 인증서 이슈 대응 → 해결 완료 (2026-04-09)
   - 원인: cafe24 와일드카드 CNAME(`*.eleup.kr → eleup.kr`)이 `_acme-challenge` DNS 조회 간섭
-  - 추가 원인: cafe24 네임서버 17개 중 5개가 eleup.kr 존 데이터 미동기화 (SERVFAIL)
-  - 조치: `_acme-challenge` TXT 레코드 추가 (cafe24 DNS), 학생 공유 URL을 web.app으로 임시 고정
-  - `getJoinLink()`: `location.origin` → `https://easyup-1604e.web.app` 하드코딩 (임시)
-  - eleup.kr SSL 정상화 후 `location.origin`으로 복원 필요
+  - 조치: `_acme-challenge` TXT 레코드 추가, SSL 발급 완료
+  - `getJoinLink()`: `location.origin`으로 복원 완료
+- [x] 분류하기 보드 학생 루트 제목 수정 가능 (2026-04-09)
+  - Firestore rules: active 보드의 `members`/`groups` 필드만 비인증 사용자도 update 허용
+  - board doc onSnapshot에서 wsTitle 변경 시 즉시 re-render (overview 외 뷰도 포함)
+- [x] 탐구질문판 UI 개선
+  - 교사 보드뷰 헤더 간략화 (학생과 동일한 `gallery-header` 스타일)
+  - 학생 뷰 "질문의 종류" 매뉴얼 버튼 (FAB) + 설명 모달 추가
+- [x] 분류하기 책 뷰: 읽기 전용 공개 링크 + 표지 QR 코드 (전자출판)
+  - 새 라우트: `#book/CODE/WORKSPACE_ID` (로그인 불필요)
+  - `showReadOnlyBook()`: 1회성 Firestore 로드 → 책 오버레이 렌더링
+  - `clGenerateQrDataUrl()`: QRCode.js canvas → data URL (hidden div 방식)
+  - `getBookLink()`: 읽기 전용 URL 생성 유틸리티
+  - QRCode.js CDN을 메인 페이지에 추가 (index.html)
+  - 표지 우하단에 QR 이미지 (72x72) + "온라인으로 보기" 텍스트
+  - 읽기 전용 모드: `.clb-readonly`에서 pdf/close/star 버튼 숨김
+  - 라우팅: `earlyStudentRoute`와 `onAuthStateChanged` 양쪽에 `book/` 추가 (로그인 화면 깜빡임 방지)
+- [x] 책 뷰 모바일 UX 개선
+  - 모바일(≤768px)에서 spread 대신 `single` 페이지 타입으로 빌드 (한 쪽씩 보기)
+  - `clRenderBookPage`에 `single` 타입 렌더러, `clBookPrint`도 `single` 처리
+  - `aspect-ratio` 제거 → 세로 화면에 맞게 `min-height:70vh` 확장
+  - 페이지 좌우 35% 탭 네비게이션 추가 (마우스 클릭 + 터치)
+  - 네비 버튼 크기 확대 (42x42px)
+  - chapter 구분선 겹침 해소: top/bottom 16px, padding 48px
+  - `.clb-single` 이미지 max-height 제한 (40vh/30vh/25vh) — 세로 긴 이미지 넘침 방지
+  - `-webkit-tap-highlight-color:transparent` 전체 적용 (모바일 탭 하이라이트 제거)
+- [x] 이미지 프리로드 (`clPreloadImages`)
+  - 책 뷰 진입 시 모든 카드 이미지를 `new Image()`로 백그라운드 로드
+  - 브라우저 캐시에 저장되어 페이지 이동 시 즉시 표시
+  - 책 뷰/QR 읽기 전용/인쇄·소책자 모두에 적용
+- [x] 회원 관리: 사용량 추적 + 탭 분리
+  - 회원별 보드 수 · 제출물 수 · Storage 용량 표시
+  - 과제 파일 `files[].size` 정확 집계, 분류 이미지는 ~500KB 추정
+  - 상단 요약: 전체 보드/제출물/Storage/교사 수
+  - Firebase Console 트래픽·비용 링크
+  - 정렬: pending 우선, 그 후 Storage 용량 내림차순
+  - 탭 분리: 활성 회원 / 거부·취소 회원 (배지로 개수 표시)
+  - 이벤트 위임을 `users-view`로 이동 (두 목록 모두 커버)
 - [ ] 모바일 반응형 테스트
