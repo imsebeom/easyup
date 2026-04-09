@@ -317,4 +317,7 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - `#dashboard-view.active`를 `position:fixed` + flex column → 뷰포트 전체, 전역 스크롤 차단
   - "내 클래스" 섹션 고정(`flex:0`), 카드 한 줄 수평 배치(`class-cards-compact`)
   - "내 보드" 섹션만 `overflow-y:auto`로 스크롤
+- [x] 클래스 드래그 hover UX 정리
+  - hover 시 actions `visibility:hidden`으로 공간 유지 → 카드 크기 고정
+  - "📌 이 클래스에 배치" 배지를 `position:absolute`로 겹쳐 표시 (h3/alias는 그대로 유지)
 - [ ] 모바일 반응형 테스트
