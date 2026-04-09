@@ -25,7 +25,10 @@ service cloud.firestore {
       // Authenticated users can create boards
       allow create: if request.auth != null;
       // Only owner can update/delete
-      allow update, delete: if request.auth != null && request.auth.uid == resource.data.ownerUid;
+      allow update: if (request.auth != null && request.auth.uid == resource.data.ownerUid)
+        || (resource.data.status == 'active'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'groups']));
+      allow delete: if request.auth != null && request.auth.uid == resource.data.ownerUid;
 
       match /submissions/{submissionId} {
         // Private boards: only owner can read
