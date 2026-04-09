@@ -299,13 +299,59 @@ function sanitizeUrl(url) {
 
 /** Build student join link for a board code */
 function getJoinLink(code) {
-  const origin = location.origin;
-  return `${origin}${location.pathname}#join/${code}`;
+  // Always use root path so we don't accidentally include a class alias path
+  return `${location.origin}/#join/${code}`;
 }
 
 /** Build read-only book link for a classify workspace */
 function getBookLink(code, workspaceId) {
-  return `${location.origin}${location.pathname}#book/${code}/${workspaceId}`;
+  return `${location.origin}/#book/${code}/${workspaceId}`;
+}
+
+/** Build public class student link (path-based: eleup.kr/mrkim) */
+function getClassStudentLink(alias) {
+  return `${location.origin}/${alias}`;
+}
+
+/** Build teacher class edit link */
+function getClassTeacherLink(alias) {
+  return `${location.origin}/#class/${alias}`;
+}
+
+const DAY_LABEL = { mon: '월', tue: '화', wed: '수', thu: '목', fri: '금' };
+const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
+const BOARD_TYPE_ICON = { inquiry: '🔬', classify: '🗂', assignment: '📋' };
+const boardIcon = (t) => BOARD_TYPE_ICON[t] || BOARD_TYPE_ICON.assignment;
+/** JavaScript getDay(): Sun=0, Mon=1, ... Fri=5, Sat=6 → map to DAY_KEYS index */
+function getTodayDayKey() {
+  const d = new Date().getDay();
+  if (d >= 1 && d <= 5) return DAY_KEYS[d - 1];
+  return 'mon';
+}
+/** Get Monday of the week containing given date, as YYYY-MM-DD string */
+function getMondayStr(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay(); // Sun=0..Sat=6
+  const diff = day === 0 ? -6 : 1 - day; // to Monday
+  d.setDate(d.getDate() + diff);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function shiftWeek(weekStartStr, offsetWeeks) {
+  const d = new Date(weekStartStr + 'T00:00:00');
+  d.setDate(d.getDate() + offsetWeeks * 7);
+  return getMondayStr(d);
+}
+function formatWeekLabel(weekStartStr) {
+  const mon = new Date(weekStartStr + 'T00:00:00');
+  const fri = new Date(mon); fri.setDate(mon.getDate() + 4);
+  const mm = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+  return `${mm(mon)} ~ ${mm(fri)}`;
+}
+function getDateForDay(weekStartStr, dayKey) {
+  const d = new Date(weekStartStr + 'T00:00:00');
+  d.setDate(d.getDate() + DAY_KEYS.indexOf(dayKey));
+  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 /** Generate QR code as data URL (synchronous, uses QRCode.js) */
@@ -418,11 +464,28 @@ async function checkUserApproval(user) {
 }
 
 // Student routes: handle immediately before auth (no flash of login screen)
+/** Extract class alias from path-based URL (e.g. /mrkim → 'mrkim'). Returns null if not matched. */
+function getClassAliasFromPath() {
+  const path = location.pathname.replace(/^\/|\/$/g, '');
+  if (/^[a-z0-9]{4,20}$/.test(path)) return path;
+  return null;
+}
+
 (function earlyStudentRoute() {
   const hash = location.hash.slice(1);
+  // Path-based class URL (eleup.kr/mrkim)
+  const pathAlias = getClassAliasFromPath();
+  if (pathAlias && !hash) {
+    showClassStudent(pathAlias);
+    return;
+  }
   if (hash.startsWith('book/')) {
     const parts = hash.split('/');
     showReadOnlyBook(parts[1].toUpperCase(), parts[2] || '');
+    return;
+  }
+  if (hash.startsWith('c/')) {
+    showClassStudent(hash.split('/')[1]);
     return;
   }
   if (hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/') || hash.startsWith('classify/')) {
@@ -435,7 +498,11 @@ onAuthStateChanged(auth, async (user) => {
   const hash = location.hash.slice(1);
 
   // Student/public routes: already handled by earlyStudentRoute or popstate
-  if (hash.startsWith('book/') || hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/') || hash.startsWith('classify/')) {
+  if (hash.startsWith('book/') || hash.startsWith('c/') || hash.startsWith('join/') || hash.startsWith('gallery/') || hash.startsWith('inquiry/') || hash.startsWith('classify/')) {
+    return;
+  }
+  // Path-based public class URL
+  if (!hash && getClassAliasFromPath()) {
     return;
   }
 
@@ -478,6 +545,7 @@ onAuthStateChanged(auth, async (user) => {
     showView('dashboard-view');
     location.hash = 'dashboard';
     loadMyBoards();
+    loadMyClasses();
   }
 });
 
@@ -653,6 +721,12 @@ document.getElementById('users-view').addEventListener('click', (e) => {
 /** Parse hash and navigate. Returns true if a route matched. */
 function handleRoute() {
   const hash = location.hash.slice(1);
+  // Path-based class URL (no auth needed)
+  const pathAlias = getClassAliasFromPath();
+  if (pathAlias && !hash) {
+    showClassStudent(pathAlias);
+    return true;
+  }
   // Read-only book route (no auth needed)
   if (hash.startsWith('book/')) {
     const parts = hash.split('/');
@@ -673,7 +747,8 @@ function handleRoute() {
     showView('created-view');
     return true;
   }
-  if (hash === 'dashboard') { showView('dashboard-view'); loadMyBoards(); return true; }
+  if (hash.startsWith('class/')) { showClassTeacher(hash.split('/')[1]); return true; }
+  if (hash === 'dashboard') { showView('dashboard-view'); loadMyBoards(); loadMyClasses(); return true; }
   if (hash === 'users' && currentUserRole === 'admin') { showView('users-view'); return true; }
   return false;
 }
@@ -1541,6 +1616,418 @@ async function removeSubmission(id, { checkOwnership = false, isTeacher = false 
 }
 
 // ══════════════════════════════════════
+//  TEACHER: CLASSES (Weekly Schedule)
+// ══════════════════════════════════════
+let currentClass = null;
+let currentClassAlias = '';
+let currentClassWeekStart = ''; // YYYY-MM-DD (Monday)
+let currentClassSlots = [];
+let currentClassMode = 'week'; // 'week' | 'table'
+let unsubscribeClassSlots = null;
+let unsubscribeClassDoc = null;
+
+async function loadMyClasses() {
+  if (!currentUser) return;
+  const container = document.getElementById('dashboard-classes');
+  container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+  try {
+    const q = query(collection(db, 'classes'), where('ownerUid', '==', currentUser.uid));
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) {
+      container.innerHTML = '<div class="empty-state"><p>아직 클래스가 없습니다. 새 클래스를 만들어보세요.</p></div>';
+      return;
+    }
+    const classes = snapshot.docs.map(d => ({ alias: d.id, ...d.data() }));
+    classes.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+    container.innerHTML = classes.map(c => `
+      <div class="class-card" data-alias="${escapeHtml(c.alias)}">
+        <div class="class-card-main">
+          <h3>${escapeHtml(c.title || '')}</h3>
+          <div class="class-card-alias">/${escapeHtml(c.alias)}</div>
+          ${c.description ? `<p class="class-card-desc">${escapeHtml(c.description)}</p>` : ''}
+        </div>
+        <div class="class-card-actions">
+          <button class="btn btn-sm btn-primary" onclick="location.hash='class/${escapeHtml(c.alias)}'">열기</button>
+          <button class="btn btn-sm btn-secondary" onclick="copyClassStudentLink('${escapeHtml(c.alias)}')">🔗 학생 링크</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    console.error(e);
+    container.innerHTML = '<div class="empty-state">불러오기 실패</div>';
+  }
+}
+
+window.openCreateClassModal = function() {
+  document.getElementById('new-class-title').value = '';
+  document.getElementById('new-class-alias').value = '';
+  document.getElementById('new-class-desc').value = '';
+  document.getElementById('alias-preview').textContent = 'mrkim';
+  document.getElementById('create-class-modal').style.display = 'flex';
+  openModalHistory();
+  const aliasInput = document.getElementById('new-class-alias');
+  aliasInput.oninput = () => {
+    // Only allow lowercase letters and numbers
+    aliasInput.value = aliasInput.value.toLowerCase().replace(/[^a-z0-9]/g, '');
+    document.getElementById('alias-preview').textContent = aliasInput.value || 'mrkim';
+  };
+};
+window.closeCreateClassModal = function() { closeModal('create-class-modal'); };
+
+window.createClass = async function() {
+  const title = document.getElementById('new-class-title').value.trim();
+  const alias = document.getElementById('new-class-alias').value.trim().toLowerCase();
+  const description = document.getElementById('new-class-desc').value.trim();
+  if (!title) { toast('제목을 입력하세요'); return; }
+  if (!alias || !/^[a-z0-9]{4,20}$/.test(alias)) { toast('주소는 영문 소문자/숫자 4~20자'); return; }
+  const reserved = ['admin', 'dashboard', 'class', 'users', 'join', 'gallery', 'inquiry', 'classify', 'book', 'index', 'api', 'static', 'assets', 'public', 'app', 'auth', 'login', 'logout', 'signup', 'signin', 'about', 'help', 'settings'];
+  if (reserved.includes(alias)) { toast('사용할 수 없는 주소입니다'); return; }
+
+  try {
+    const existing = await getDoc(doc(db, 'classes', alias));
+    if (existing.exists()) { toast('이미 사용 중인 별칭입니다'); return; }
+
+    await setDoc(doc(db, 'classes', alias), {
+      alias, title, description,
+      ownerUid: currentUser.uid,
+      ownerName: currentUser.displayName || currentUser.email,
+      status: 'active',
+      createdAt: serverTimestamp()
+    });
+    toast('클래스 생성됨');
+    closeModal('create-class-modal');
+    location.hash = `class/${alias}`;
+  } catch (e) { console.error(e); toast('생성 실패: ' + e.message); }
+};
+
+/** Teacher: open class edit view */
+async function showClassTeacher(alias) {
+  if (!currentUser) { toast('로그인 필요'); return; }
+  try {
+    const snap = await getDoc(doc(db, 'classes', alias));
+    if (!snap.exists()) { toast('존재하지 않는 클래스'); location.hash = 'dashboard'; return; }
+    const data = snap.data();
+    if (data.ownerUid !== currentUser.uid) { toast('권한이 없습니다'); location.hash = 'dashboard'; return; }
+
+    currentClass = { alias, ...data };
+    currentClassAlias = alias;
+    currentClassWeekStart = getMondayStr(new Date());
+
+    document.getElementById('class-title-display').textContent = data.title;
+    setTextVisibility('class-desc-display', data.description);
+    document.getElementById('class-alias-badge').textContent = `/${alias}`;
+    showView('class-view');
+    location.hash = `class/${alias}`;
+
+    currentClassMode = 'week';
+    document.querySelectorAll('[data-class-mode]').forEach(b => b.classList.toggle('active', b.dataset.classMode === 'week'));
+    document.getElementById('class-grid').style.display = '';
+    document.getElementById('class-table').style.display = 'none';
+    document.getElementById('class-week-nav').style.display = '';
+
+    // Listen to slots
+    if (unsubscribeClassSlots) unsubscribeClassSlots();
+    unsubscribeClassSlots = onSnapshot(
+      collection(db, 'classes', alias, 'slots'),
+      (snap) => {
+        currentClassSlots = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (currentClassMode === 'week') renderClassGrid();
+        else renderClassTable();
+      }
+    );
+    // Listen to class doc for title/weekCount updates
+    if (unsubscribeClassDoc) unsubscribeClassDoc();
+    unsubscribeClassDoc = onSnapshot(doc(db, 'classes', alias), (snap) => {
+      if (snap.exists()) {
+        currentClass = { alias, ...snap.data() };
+        document.getElementById('class-title-display').textContent = currentClass.title;
+        setTextVisibility('class-desc-display', currentClass.description);
+        if (currentClassMode === 'week') renderClassGrid();
+        else renderClassTable();
+      }
+    });
+  } catch (e) { console.error(e); toast('오류: ' + e.message); }
+}
+
+function renderClassGrid() {
+  const container = document.getElementById('class-grid');
+  if (!container || !currentClass) return;
+
+  document.getElementById('class-week-label').textContent = formatWeekLabel(currentClassWeekStart);
+  renderWeekGrid(container, currentClassWeekStart, currentClassSlots, true);
+}
+
+/** Render a week × weekday grid. Shared by teacher (editable) and student (readonly) views. */
+function renderWeekGrid(container, weekStart, allSlots, isTeacher) {
+  const today = getMondayStr(new Date()) === weekStart ? getTodayDayKey() : null;
+  const slotsThisWeek = allSlots.filter(s => s.weekStart === weekStart);
+  container.innerHTML = DAY_KEYS.map(day => {
+    const slots = slotsThisWeek.filter(s => s.day === day).sort((a, b) => (a.order || 0) - (b.order || 0));
+    const slotsHtml = slots.length
+      ? slots.map(s => isTeacher
+        ? `<div class="class-slot-card" data-type="${s.type || ''}">
+            <div class="class-slot-icon">${boardIcon(s.type)}</div>
+            <div class="class-slot-title">${escapeHtml(s.title || s.boardCode)}</div>
+            <div class="class-slot-actions">
+              <button class="btn btn-sm btn-secondary" onclick="location.hash='board/${s.boardCode}'">열기</button>
+              <button class="btn btn-sm btn-danger" onclick="removeClassSlot('${s.id}')">✕</button>
+            </div>
+          </div>`
+        : `<a href="${getJoinLink(s.boardCode)}" class="class-slot-card class-slot-link" data-type="${s.type || ''}">
+            <div class="class-slot-icon">${boardIcon(s.type)}</div>
+            <div class="class-slot-title">${escapeHtml(s.title || s.boardCode)}</div>
+          </a>`
+      ).join('')
+      : '<div class="class-slot-empty">비어있음</div>';
+    return `<div class="class-day-col ${day === today ? 'class-day-today' : ''}">
+      <div class="class-day-header">${DAY_LABEL[day]} <span class="class-day-date">${getDateForDay(weekStart, day)}</span></div>
+      <div class="class-day-body">${slotsHtml}</div>
+    </div>`;
+  }).join('');
+}
+
+window.classWeekPrev = function() {
+  currentClassWeekStart = shiftWeek(currentClassWeekStart, -1);
+  renderClassGrid();
+};
+window.classWeekNext = function() {
+  currentClassWeekStart = shiftWeek(currentClassWeekStart, 1);
+  renderClassGrid();
+};
+window.classWeekToday = function() {
+  currentClassWeekStart = getMondayStr(new Date());
+  renderClassGrid();
+};
+
+window.switchClassMode = function(mode) {
+  currentClassMode = mode;
+  document.querySelectorAll('[data-class-mode]').forEach(b => b.classList.toggle('active', b.dataset.classMode === mode));
+  document.getElementById('class-grid').style.display = mode === 'week' ? '' : 'none';
+  document.getElementById('class-table').style.display = mode === 'table' ? '' : 'none';
+  document.getElementById('class-week-nav').style.display = mode === 'week' ? '' : 'none';
+  if (mode === 'week') renderClassGrid();
+  else renderClassTable();
+};
+
+function renderClassTable() {
+  const container = document.getElementById('class-table');
+  if (!container) return;
+  // Group slots by weekStart
+  const byWeek = {};
+  currentClassSlots.forEach(s => {
+    if (!s.weekStart) return;
+    if (!byWeek[s.weekStart]) byWeek[s.weekStart] = { mon: [], tue: [], wed: [], thu: [], fri: [] };
+    if (byWeek[s.weekStart][s.day]) byWeek[s.weekStart][s.day].push(s);
+  });
+  const weeks = Object.keys(byWeek).sort();
+  if (weeks.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>배치된 보드가 없습니다</p></div>';
+    return;
+  }
+  const todayWeek = getMondayStr(new Date());
+  const todayDay = getTodayDayKey();
+  const rows = weeks.map(w => {
+    const isThisWeek = w === todayWeek;
+    const cells = DAY_KEYS.map(day => {
+      const slots = byWeek[w][day];
+      const isToday = isThisWeek && day === todayDay;
+      const slotsHtml = slots.length
+        ? slots.map(s => `
+          <div class="class-table-slot">
+            <span>${boardIcon(s.type)}</span>
+            <a href="#board/${s.boardCode}" class="class-table-slot-title">${escapeHtml(s.title || s.boardCode)}</a>
+            <button class="btn-table-del" onclick="removeClassSlot('${s.id}')" title="제거">✕</button>
+          </div>
+        `).join('')
+        : '<span class="class-table-empty">-</span>';
+      return `<td class="${isToday ? 'class-table-today' : ''}">${slotsHtml}</td>`;
+    }).join('');
+    return `<tr ${isThisWeek ? 'class="class-table-row-this"' : ''}>
+      <th class="class-table-week">${formatWeekLabel(w)}</th>
+      ${cells}
+    </tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <table class="class-table">
+      <thead>
+        <tr>
+          <th>주</th>
+          ${DAY_KEYS.map(d => `<th>${DAY_LABEL[d]}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+window.openEditClassModal = function() {
+  if (!currentClass) return;
+  document.getElementById('edit-class-title').value = currentClass.title || '';
+  document.getElementById('edit-class-desc').value = currentClass.description || '';
+  document.getElementById('edit-class-modal').style.display = 'flex';
+  openModalHistory();
+};
+window.closeEditClassModal = function() { closeModal('edit-class-modal'); };
+window.saveEditClass = async function() {
+  const title = document.getElementById('edit-class-title').value.trim();
+  const description = document.getElementById('edit-class-desc').value.trim();
+  if (!title) { toast('제목을 입력하세요'); return; }
+  try {
+    await updateDoc(doc(db, 'classes', currentClassAlias), { title, description });
+    toast('저장됨');
+    closeModal('edit-class-modal');
+  } catch (e) { toast('실패'); }
+};
+
+window.deleteClass = async function() {
+  if (!currentClass) return;
+  if (!confirm(`"${currentClass.title}" 클래스를 삭제하시겠어요? 배치된 보드 원본은 유지됩니다.`)) return;
+  try {
+    // Delete all slots first
+    const slotsSnap = await getDocs(collection(db, 'classes', currentClassAlias, 'slots'));
+    await Promise.all(slotsSnap.docs.map(d => deleteDoc(d.ref)));
+    await deleteDoc(doc(db, 'classes', currentClassAlias));
+    toast('삭제됨');
+    if (unsubscribeClassSlots) { unsubscribeClassSlots(); unsubscribeClassSlots = null; }
+    if (unsubscribeClassDoc) { unsubscribeClassDoc(); unsubscribeClassDoc = null; }
+    location.hash = 'dashboard';
+  } catch (e) { toast('삭제 실패'); }
+};
+
+window.copyClassStudentLink = function(alias) {
+  const target = alias || currentClassAlias;
+  if (!target) return;
+  navigator.clipboard.writeText(getClassStudentLink(target));
+  toast('학생 링크 복사됨');
+};
+
+window.openPlaceBoardModal = async function() {
+  if (!currentClass) return;
+  // Populate week select: current week ± 4 weeks
+  const weekSelect = document.getElementById('place-week-select');
+  const weeks = [];
+  for (let i = -2; i <= 8; i++) weeks.push(shiftWeek(currentClassWeekStart, i));
+  weekSelect.innerHTML = weeks.map(w =>
+    `<option value="${w}" ${w === currentClassWeekStart ? 'selected' : ''}>${formatWeekLabel(w)}</option>`
+  ).join('');
+  // Reset day checkboxes
+  document.querySelectorAll('#place-day-select input[type=checkbox]').forEach(cb => cb.checked = false);
+
+  // Load teacher's boards
+  const list = document.getElementById('place-board-list');
+  list.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+  try {
+    const q = query(collection(db, 'boards'), where('ownerUid', '==', currentUser.uid));
+    const snap = await getDocs(q);
+    if (snap.empty) { list.innerHTML = '<div class="empty-state">배치할 보드가 없습니다</div>'; }
+    else {
+      const boards = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .filter(b => !b.hidden)
+        .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      list.innerHTML = boards.map(b => `
+        <label class="place-board-item">
+          <input type="radio" name="place-board" value="${escapeHtml(b.id)}" data-title="${escapeHtml(b.title)}" data-type="${b.type || 'assignment'}">
+          <span class="place-board-icon">${boardIcon(b.type)}</span>
+          <span>${escapeHtml(b.title)}</span>
+        </label>
+      `).join('');
+    }
+  } catch (e) { list.innerHTML = '<div class="empty-state">불러오기 실패</div>'; }
+  document.getElementById('place-board-modal').style.display = 'flex';
+  openModalHistory();
+};
+window.closePlaceBoardModal = function() { closeModal('place-board-modal'); };
+
+window.confirmPlaceBoard = async function() {
+  const selected = document.querySelector('#place-board-list input[name=place-board]:checked');
+  if (!selected) { toast('보드를 선택하세요'); return; }
+  const days = Array.from(document.querySelectorAll('#place-day-select input[type=checkbox]:checked')).map(cb => cb.value);
+  if (days.length === 0) { toast('요일을 선택하세요'); return; }
+  const weekStart = document.getElementById('place-week-select').value;
+  const boardCode = selected.value;
+  const boardTitle = selected.dataset.title;
+  const boardType = selected.dataset.type;
+
+  try {
+    await Promise.all(days.map(day => {
+      const slotId = `${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`;
+      return setDoc(doc(db, 'classes', currentClassAlias, 'slots', slotId), {
+        boardCode, weekStart, day, order: Date.now(),
+        title: boardTitle, type: boardType,
+        createdAt: serverTimestamp()
+      });
+    }));
+    toast(`${days.length}개 요일에 배치됨`);
+    closeModal('place-board-modal');
+  } catch (e) { console.error(e); toast('배치 실패'); }
+};
+
+window.removeClassSlot = async function(slotId) {
+  if (!confirm('이 배치를 제거하시겠어요?')) return;
+  try {
+    await deleteDoc(doc(db, 'classes', currentClassAlias, 'slots', slotId));
+    toast('제거됨');
+  } catch (e) { toast('실패'); }
+};
+
+// ══════════════════════════════════════
+//  STUDENT: CLASS PUBLIC VIEW
+// ══════════════════════════════════════
+let studentClassAlias = '';
+let studentClassWeekStart = '';
+let studentClassData = null;
+let studentClassSlots = [];
+
+async function showClassStudent(alias) {
+  try {
+    const snap = await getDoc(doc(db, 'classes', alias));
+    if (!snap.exists()) {
+      document.getElementById('class-student-title').textContent = '존재하지 않는 클래스';
+      document.getElementById('class-student-grid').innerHTML = '<div class="empty-state">URL을 확인해주세요</div>';
+      showView('class-student-view');
+      return;
+    }
+    studentClassData = snap.data();
+    studentClassAlias = alias;
+    studentClassWeekStart = getMondayStr(new Date());
+
+    document.getElementById('class-student-title').textContent = studentClassData.title || '';
+    setTextVisibility('class-student-desc', studentClassData.description);
+    const todayKey = getTodayDayKey();
+    document.getElementById('class-student-today').textContent = `오늘: ${DAY_LABEL[todayKey]}요일`;
+    showView('class-student-view');
+
+    if (unsubscribeClassSlots) { unsubscribeClassSlots(); unsubscribeClassSlots = null; }
+    if (unsubscribeClassDoc) { unsubscribeClassDoc(); unsubscribeClassDoc = null; }
+    unsubscribeClassSlots = onSnapshot(
+      collection(db, 'classes', alias, 'slots'),
+      (snap) => {
+        studentClassSlots = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderClassStudentView();
+      }
+    );
+  } catch (e) { console.error(e); toast('불러오기 실패'); }
+}
+
+function renderClassStudentView() {
+  document.getElementById('class-student-week-label').textContent = formatWeekLabel(studentClassWeekStart);
+  renderWeekGrid(document.getElementById('class-student-grid'), studentClassWeekStart, studentClassSlots, false);
+}
+
+window.classStudentWeekPrev = function() {
+  studentClassWeekStart = shiftWeek(studentClassWeekStart, -1);
+  renderClassStudentView();
+};
+window.classStudentWeekNext = function() {
+  studentClassWeekStart = shiftWeek(studentClassWeekStart, 1);
+  renderClassStudentView();
+};
+window.classStudentWeekToday = function() {
+  studentClassWeekStart = getMondayStr(new Date());
+  renderClassStudentView();
+};
+
+// ══════════════════════════════════════
 //  TEACHER: DASHBOARD
 // ══════════════════════════════════════
 async function loadMyBoards() {
@@ -1661,7 +2148,7 @@ function copyJoinLink(code) {
 }
 
 function getTeacherLink(code) {
-  return `${location.origin}${location.pathname}#board/${code}`;
+  return `${location.origin}/#board/${code}`;
 }
 
 function copyTeacherLink(code) {
@@ -1857,7 +2344,7 @@ window.createBoard = async function() {
 window.copyCode = () => { navigator.clipboard.writeText(currentBoardCode); toast('코드 복사됨'); };
 window.copyLink = () => { navigator.clipboard.writeText(getJoinLink(currentBoardCode)); toast('링크 복사됨'); };
 window.goToBoard = () => openBoard(currentBoardCode);
-window.backToDashboard = () => { showView('dashboard-view'); location.hash = 'dashboard'; loadMyBoards(); };
+window.backToDashboard = () => { showView('dashboard-view'); location.hash = 'dashboard'; loadMyBoards(); loadMyClasses(); };
 
 window.copyBoardLink = () => {
   navigator.clipboard.writeText(getJoinLink(currentBoard.code));
@@ -1892,11 +2379,87 @@ async function openBoard(code) {
 
     showView('board-view');
     location.hash = `board/${code}`;
+    loadBoardPlacements(code);
 
     if (unsubscribe) unsubscribe();
     unsubscribe = onSnapshot(submissionsQuery(code), (snap) => { galleryDocs = snap.docs; renderSubmissions(snap.docs); });
   } catch (e) { toast('오류 발생'); }
 }
+
+/** Load all class slots referencing this board for the current teacher.
+ *  Updates all .board-placements-wrap elements currently in the DOM. */
+async function loadBoardPlacements(boardCode) {
+  const wraps = document.querySelectorAll('.board-placements-wrap');
+  if (wraps.length === 0) return;
+  wraps.forEach(w => {
+    const count = w.querySelector('.placements-count');
+    if (count) count.textContent = '';
+    const dd = w.querySelector('.board-placements-dropdown');
+    if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
+  });
+  if (!currentUser) return;
+  try {
+    const classSnap = await getDocs(query(collection(db, 'classes'), where('ownerUid', '==', currentUser.uid)));
+    const placements = [];
+    await Promise.all(classSnap.docs.map(async (cDoc) => {
+      const cData = cDoc.data();
+      const slotsSnap = await getDocs(query(collection(db, 'classes', cDoc.id, 'slots'), where('boardCode', '==', boardCode)));
+      slotsSnap.docs.forEach(sDoc => {
+        const s = sDoc.data();
+        placements.push({ slotId: sDoc.id, classAlias: cDoc.id, classTitle: cData.title, weekStart: s.weekStart, day: s.day });
+      });
+    }));
+
+    placements.sort((a, b) => (a.classTitle || '').localeCompare(b.classTitle || '') || (a.weekStart || '').localeCompare(b.weekStart || ''));
+    const countLabel = placements.length === 0 ? '(없음)' : `(${placements.length})`;
+    const dropdownHtml = placements.length === 0
+      ? '<div class="empty-state" style="padding:12px">이 보드는 어느 클래스에도 배치되지 않았습니다</div>'
+      : placements.map(p => `
+        <div class="board-placement-item">
+          <a class="board-placement-link" href="#class/${escapeHtml(p.classAlias)}">
+            <span class="board-placement-class">${escapeHtml(p.classTitle || p.classAlias)}</span>
+            <span class="board-placement-meta">${p.weekStart ? formatWeekLabel(p.weekStart) : ''} · ${DAY_LABEL[p.day] || p.day}</span>
+          </a>
+          <button class="board-placement-del" data-alias="${escapeHtml(p.classAlias)}" data-slot="${escapeHtml(p.slotId)}" title="이 배치 제거">✕</button>
+        </div>
+      `).join('');
+    wraps.forEach(w => {
+      const count = w.querySelector('.placements-count');
+      if (count) count.textContent = countLabel;
+      const dd = w.querySelector('.board-placements-dropdown');
+      if (dd) dd.innerHTML = dropdownHtml;
+    });
+  } catch (e) { console.error(e); }
+}
+
+window.toggleBoardPlacements = function(btn) {
+  const wrap = btn.closest('.board-placements-wrap');
+  if (!wrap) return;
+  const d = wrap.querySelector('.board-placements-dropdown');
+  d.style.display = d.style.display === 'none' ? 'block' : 'none';
+};
+
+document.addEventListener('click', async (e) => {
+  // Delete placement button
+  const delBtn = e.target.closest('.board-placement-del');
+  if (delBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const { alias, slot } = delBtn.dataset;
+    if (!alias || !slot) return;
+    if (!confirm('이 배치를 제거하시겠어요?')) return;
+    try {
+      await deleteDoc(doc(db, 'classes', alias, 'slots', slot));
+      toast('배치 제거됨');
+      if (currentBoardCode) loadBoardPlacements(currentBoardCode);
+    } catch (err) { toast('제거 실패'); }
+    return;
+  }
+  // Close any open placement dropdowns when clicking outside
+  if (!e.target.closest('.board-placements-wrap')) {
+    document.querySelectorAll('.board-placements-dropdown').forEach(d => d.style.display = 'none');
+  }
+});
 
 function renderSubmissions(docs) {
   const list = document.getElementById('submissions-list');
@@ -2617,6 +3180,7 @@ function showInquiryBoard(code) {
 
   showView('inquiry-board-view');
   location.hash = `board/${code}`;
+  loadBoardPlacements(code);
 
   if (unsubscribeInquiryBoard) unsubscribeInquiryBoard();
   unsubscribeInquiryBoard = onSnapshot(
@@ -3143,6 +3707,7 @@ function showClassifyBoard(code) {
   if (searchInput) searchInput.value = '';
 
   showView('classify-board-view');
+  loadBoardPlacements(code);
 
   if (unsubscribeClassifyBoard) unsubscribeClassifyBoard();
   unsubscribeClassifyBoard = clSubscribe('cl-board-container', true);

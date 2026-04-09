@@ -62,6 +62,13 @@
       </header>
       <div class="dashboard-content">
         <div class="dashboard-list-header">
+          <h2>내 클래스</h2>
+          <button class="btn btn-primary btn-sm" onclick="openCreateClassModal()">+ 새 클래스</button>
+        </div>
+        <div id="dashboard-classes" class="class-cards">
+          <div class="empty-state"><p>아직 클래스가 없습니다</p></div>
+        </div>
+        <div class="dashboard-list-header" style="margin-top:32px">
           <h2>내 보드</h2>
           <button class="btn btn-primary btn-sm" onclick="showView('create-view')">+ 새 보드</button>
         </div>
@@ -305,6 +312,10 @@
         <div class="gallery-header-right">
           <span id="inquiry-submission-count" class="count-badge"></span>
           <span class="board-code-badge" id="inquiry-board-code-badge"></span>
+          <div class="board-placements-wrap">
+            <button class="btn btn-small" onclick="toggleBoardPlacements(this)">🗓 <span class="placements-count"></span></button>
+            <div class="board-placements-dropdown" style="display:none"></div>
+          </div>
           <button class="btn btn-small" id="inquiry-peek-toggle" onclick="togglePeekFromBoard()"></button>
           <button class="btn btn-small" onclick="openEditBoardModal()">✏️</button>
           <button class="btn btn-small" onclick="showBoardQr()">📱</button>
@@ -327,6 +338,10 @@
       <div class="board-toolbar">
         <span id="classify-submission-count" class="count-badge"></span>
         <div class="toolbar-actions">
+          <div class="board-placements-wrap">
+            <button class="btn btn-small" onclick="toggleBoardPlacements(this)">🗓 클래스 배치 <span class="placements-count"></span></button>
+            <div class="board-placements-dropdown" style="display:none"></div>
+          </div>
           <button class="btn btn-small" id="cl-peek-toggle-btn" onclick="clTogglePeekFromBoard()"></button>
           <button class="btn btn-small" onclick="openEditBoardModal()">✏️ 수정</button>
           <button class="btn btn-small" onclick="showBoardQr()">📱 QR 코드</button>
@@ -420,6 +435,139 @@
     </div>
 
     <!-- 관리자: 회원 관리 -->
+    <!-- 교사: 클래스 편집 뷰 -->
+    <div id="class-view" class="view">
+      <header class="gallery-header">
+        <div class="gallery-header-left">
+          <button class="btn-back" onclick="backToDashboard()">← 대시보드</button>
+          <h1 id="class-title-display"></h1>
+          <p id="class-desc-display" class="gallery-desc"></p>
+        </div>
+        <div class="gallery-header-right">
+          <span class="board-code-badge" id="class-alias-badge"></span>
+          <button class="btn btn-small" onclick="copyClassStudentLink()">🔗 학생 링크</button>
+          <button class="btn btn-small" onclick="openEditClassModal()">✏️</button>
+          <button class="btn btn-small btn-danger" onclick="deleteClass()">🗑</button>
+        </div>
+      </header>
+      <div class="class-week-controls">
+        <div class="class-view-toggle">
+          <button class="btn btn-small active" data-class-mode="week" onclick="switchClassMode('week')">주간</button>
+          <button class="btn btn-small" data-class-mode="table" onclick="switchClassMode('table')">📊 테이블</button>
+        </div>
+        <div class="class-week-nav" id="class-week-nav">
+          <button class="btn btn-small" onclick="classWeekPrev()">‹</button>
+          <span id="class-week-label" class="count-badge"></span>
+          <button class="btn btn-small" onclick="classWeekNext()">›</button>
+          <button class="btn btn-small btn-secondary" onclick="classWeekToday()">오늘</button>
+        </div>
+      </div>
+      <div id="class-grid" class="class-grid"></div>
+      <div id="class-table" class="class-table-wrap" style="display:none"></div>
+      <button class="fab" onclick="openPlaceBoardModal()">+ 보드 배치</button>
+    </div>
+
+    <!-- 학생: 클래스 공개 뷰 -->
+    <div id="class-student-view" class="view">
+      <header class="gallery-header">
+        <div class="gallery-header-left">
+          <h1 id="class-student-title"></h1>
+          <p id="class-student-desc" class="gallery-desc"></p>
+        </div>
+        <div class="gallery-header-right">
+          <span id="class-student-today" class="student-badge"></span>
+        </div>
+      </header>
+      <div class="class-week-controls">
+        <button class="btn btn-small" onclick="classStudentWeekPrev()">‹</button>
+        <span id="class-student-week-label" class="count-badge"></span>
+        <button class="btn btn-small" onclick="classStudentWeekNext()">›</button>
+        <button class="btn btn-small btn-secondary" onclick="classStudentWeekToday()">오늘</button>
+      </div>
+      <div id="class-student-grid" class="class-grid"></div>
+    </div>
+
+    <!-- 클래스 생성 모달 -->
+    <div id="create-class-modal" class="modal" style="display:none">
+      <div class="modal-overlay" onclick="closeCreateClassModal()"></div>
+      <div class="modal-content" style="max-width:440px">
+        <div class="modal-header">
+          <h2>새 클래스</h2>
+          <button class="modal-close" onclick="closeCreateClassModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>클래스 제목 <span class="required">*</span></label>
+            <input type="text" id="new-class-title" placeholder="예: 3학년 2반">
+          </div>
+          <div class="form-group">
+            <label>클래스 주소 <span class="required">*</span></label>
+            <input type="text" id="new-class-alias" placeholder="예: mrkim" autocomplete="off" maxlength="20">
+            <small style="color:var(--text-light);font-size:.8rem">영문 소문자, 숫자 4~20자. 예: eleup.kr/<strong id="alias-preview">mrkim</strong></small>
+          </div>
+          <div class="form-group">
+            <label>설명 (선택)</label>
+            <textarea id="new-class-desc" rows="2" placeholder="간단한 설명"></textarea>
+          </div>
+          <button class="btn btn-primary btn-full" onclick="createClass()">만들기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 클래스 편집 모달 -->
+    <div id="edit-class-modal" class="modal" style="display:none">
+      <div class="modal-overlay" onclick="closeEditClassModal()"></div>
+      <div class="modal-content" style="max-width:440px">
+        <div class="modal-header">
+          <h2>클래스 수정</h2>
+          <button class="modal-close" onclick="closeEditClassModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>클래스 제목</label>
+            <input type="text" id="edit-class-title">
+          </div>
+          <div class="form-group">
+            <label>설명</label>
+            <textarea id="edit-class-desc" rows="2"></textarea>
+          </div>
+          <button class="btn btn-primary btn-full" onclick="saveEditClass()">저장</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 보드 배치 모달 -->
+    <div id="place-board-modal" class="modal" style="display:none">
+      <div class="modal-overlay" onclick="closePlaceBoardModal()"></div>
+      <div class="modal-content" style="max-width:520px">
+        <div class="modal-header">
+          <h2>보드 배치</h2>
+          <button class="modal-close" onclick="closePlaceBoardModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>보드 선택 <span class="required">*</span></label>
+            <div id="place-board-list" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px"></div>
+          </div>
+          <div class="form-group">
+            <label>주차</label>
+            <select id="place-week-select"></select>
+          </div>
+          <div class="form-group">
+            <label>요일 (여러 개 선택 가능)</label>
+            <div class="class-day-select" id="place-day-select">
+              <label><input type="checkbox" value="mon"> 월</label>
+              <label><input type="checkbox" value="tue"> 화</label>
+              <label><input type="checkbox" value="wed"> 수</label>
+              <label><input type="checkbox" value="thu"> 목</label>
+              <label><input type="checkbox" value="fri"> 금</label>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-full" onclick="confirmPlaceBoard()">배치하기</button>
+        </div>
+      </div>
+    </div>
+
     <div id="users-view" class="view">
       <header class="sub-header">
         <button class="btn-back" onclick="showView('dashboard-view')">← 대시보드</button>
@@ -446,6 +594,10 @@
       <div class="board-toolbar">
         <span id="submission-count" class="count-badge"></span>
         <div class="toolbar-actions">
+          <div class="board-placements-wrap">
+            <button class="btn btn-small" onclick="toggleBoardPlacements(this)">🗓 클래스 배치 <span class="placements-count"></span></button>
+            <div class="board-placements-dropdown" style="display:none"></div>
+          </div>
           <button class="btn btn-small" id="board-peek-toggle" onclick="togglePeekFromBoard()"></button>
           <button class="btn btn-small" onclick="openEditBoardModal()">✏️ 수정</button>
           <button class="btn btn-small" onclick="showBoardQr()">📱 QR 코드</button>
