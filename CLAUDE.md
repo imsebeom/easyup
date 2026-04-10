@@ -320,4 +320,9 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
 - [x] 클래스 드래그 hover UX 정리
   - hover 시 actions `visibility:hidden`으로 공간 유지 → 카드 크기 고정
   - "📌 이 클래스에 배치" 배지를 `position:absolute`로 겹쳐 표시 (h3/alias는 그대로 유지)
+- [x] 클래스 슬롯에 외부 URL 게시 기능
+  - 배치 모달에 "🔗 외부 URL" 탭 추가 (URL + 표시 제목 입력)
+  - 슬롯 데이터: `externalUrl` 필드 (boardCode 대신), `type: 'link'`
+  - 주간 그리드 + 테이블 모드 모두 🔗 아이콘 + `target="_blank"` 새 탭 열기
+  - 보라색 좌측 보더(`data-type="link"`)로 시각 구분
 - [ ] 모바일 반응형 테스트

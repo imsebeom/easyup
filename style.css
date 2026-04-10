@@ -401,6 +401,7 @@ body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',
   padding:12px 14px; display:flex; flex-direction:column; gap:6px;
   transition:all .15s;
 }
+.class-slot-card[data-type="link"] { border-left:3px solid #8B5CF6; }
 .class-slot-card[draggable="true"] { cursor:grab; }
 .class-slot-card[draggable="true"]:active { cursor:grabbing; }
 .class-slot-card.dragging { opacity:.4; }

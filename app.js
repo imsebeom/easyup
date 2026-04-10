@@ -320,7 +320,7 @@ function getClassTeacherLink(alias) {
 
 const DAY_LABEL = { mon: '월', tue: '화', wed: '수', thu: '목', fri: '금' };
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
-const BOARD_TYPE_ICON = { inquiry: '🔬', classify: '🗂', assignment: '📋' };
+const BOARD_TYPE_ICON = { inquiry: '🔬', classify: '🗂', assignment: '📋', link: '🔗' };
 const boardIcon = (t) => BOARD_TYPE_ICON[t] || BOARD_TYPE_ICON.assignment;
 /** JavaScript getDay(): Sun=0, Mon=1, ... Fri=5, Sat=6 → map to DAY_KEYS index */
 function getTodayDayKey() {
@@ -1765,20 +1765,30 @@ function renderWeekGrid(container, weekStart, allSlots, isTeacher) {
   container.innerHTML = DAY_KEYS.map(day => {
     const slots = slotsThisWeek.filter(s => s.day === day).sort((a, b) => (a.order || 0) - (b.order || 0));
     const slotsHtml = slots.length
-      ? slots.map(s => isTeacher
-        ? `<div class="class-slot-card" data-type="${s.type || ''}" data-slot-id="${escapeHtml(s.id)}" draggable="true">
-            <div class="class-slot-icon">${boardIcon(s.type)}</div>
-            <div class="class-slot-title">${escapeHtml(s.title || s.boardCode)}</div>
+      ? slots.map(s => {
+          const icon = s.externalUrl ? '🔗' : boardIcon(s.type);
+          const title = escapeHtml(s.title || s.boardCode || s.externalUrl || '');
+          if (isTeacher) {
+            const openBtn = s.externalUrl
+              ? `<button class="btn btn-sm btn-secondary" onclick="window.open('${escapeHtml(s.externalUrl)}','_blank')">열기</button>`
+              : `<button class="btn btn-sm btn-secondary" onclick="location.hash='board/${s.boardCode}'">열기</button>`;
+            return `<div class="class-slot-card" data-type="${s.type || ''}" data-slot-id="${escapeHtml(s.id)}" draggable="true">
+            <div class="class-slot-icon">${icon}</div>
+            <div class="class-slot-title">${title}</div>
             <div class="class-slot-actions">
-              <button class="btn btn-sm btn-secondary" onclick="location.hash='board/${s.boardCode}'">열기</button>
+              ${openBtn}
               <button class="btn btn-sm btn-danger" onclick="removeClassSlot('${s.id}')">✕</button>
             </div>
-          </div>`
-        : `<a href="${getJoinLink(s.boardCode)}" class="class-slot-card class-slot-link" data-type="${s.type || ''}">
-            <div class="class-slot-icon">${boardIcon(s.type)}</div>
-            <div class="class-slot-title">${escapeHtml(s.title || s.boardCode)}</div>
-          </a>`
-      ).join('')
+          </div>`;
+          } else {
+            const href = s.externalUrl ? escapeHtml(s.externalUrl) : getJoinLink(s.boardCode);
+            const target = s.externalUrl ? ' target="_blank" rel="noopener"' : '';
+            return `<a href="${href}"${target} class="class-slot-card class-slot-link" data-type="${s.type || ''}">
+            <div class="class-slot-icon">${icon}</div>
+            <div class="class-slot-title">${title}</div>
+          </a>`;
+          }
+        }).join('')
       : '<div class="class-slot-empty">비어있음</div>';
     const headerRight = isTeacher
       ? `<button class="class-day-add" data-day="${day}" data-week="${weekStart}" title="이 날짜에 보드 배치">+</button>`
@@ -1894,13 +1904,14 @@ function renderClassTable() {
       const slots = byWeek[w][day];
       const isToday = isThisWeek && day === todayDay;
       const slotsHtml = slots.length
-        ? slots.map(s => `
-          <div class="class-table-slot">
-            <span>${boardIcon(s.type)}</span>
-            <a href="#board/${s.boardCode}" class="class-table-slot-title">${escapeHtml(s.title || s.boardCode)}</a>
-            <button class="btn-table-del" onclick="removeClassSlot('${s.id}')" title="제거">✕</button>
-          </div>
-        `).join('')
+        ? slots.map(s => {
+            const icon = s.externalUrl ? '🔗' : boardIcon(s.type);
+            const title = escapeHtml(s.title || s.boardCode || s.externalUrl || '');
+            const link = s.externalUrl
+              ? `<a href="${escapeHtml(s.externalUrl)}" target="_blank" rel="noopener" class="class-table-slot-title">${title}</a>`
+              : `<a href="#board/${s.boardCode}" class="class-table-slot-title">${title}</a>`;
+            return `<div class="class-table-slot"><span>${icon}</span>${link}<button class="btn-table-del" onclick="removeClassSlot('${s.id}')" title="제거">✕</button></div>`;
+          }).join('')
         : '<span class="class-table-empty">-</span>';
       return `<td class="${isToday ? 'class-table-today' : ''}">${slotsHtml}</td>`;
     }).join('');
@@ -2043,9 +2054,11 @@ window.openPlaceBoardModal = async function(presetDay, presetWeek) {
       `).join('');
     }
   } catch (e) { list.innerHTML = '<div class="empty-state">불러오기 실패</div>'; }
-  // Reset new-board fields and default tab to existing
+  // Reset new-board / url fields and default tab to existing
   document.getElementById('place-new-title').value = '';
   document.getElementById('place-new-desc').value = '';
+  document.getElementById('place-url-input').value = '';
+  document.getElementById('place-url-title').value = '';
   const firstType = document.querySelector('input[name="place-new-type"][value="assignment"]');
   if (firstType) firstType.checked = true;
   switchPlaceTab('existing');
@@ -2058,6 +2071,7 @@ window.switchPlaceTab = function(tab) {
   document.querySelectorAll('.place-tab').forEach(b => b.classList.toggle('active', b.dataset.ptab === tab));
   document.getElementById('place-tab-existing').style.display = tab === 'existing' ? '' : 'none';
   document.getElementById('place-tab-new').style.display = tab === 'new' ? '' : 'none';
+  document.getElementById('place-tab-url').style.display = tab === 'url' ? '' : 'none';
 };
 
 /** Create a new board with default settings for the given type. Returns {code, title, type}. */
@@ -2088,9 +2102,17 @@ window.confirmPlaceBoard = async function() {
   if (days.length === 0) { toast('요일을 선택하세요'); return; }
   const weekStart = document.getElementById('place-week-select').value;
 
-  let boardCode, boardTitle, boardType;
+  let boardCode, boardTitle, boardType, externalUrl;
 
-  if (activeTab === 'new') {
+  if (activeTab === 'url') {
+    const rawUrl = document.getElementById('place-url-input').value.trim();
+    if (!rawUrl) { toast('URL을 입력하세요'); return; }
+    externalUrl = sanitizeUrl(rawUrl);
+    if (!externalUrl) { toast('유효하지 않은 URL입니다'); return; }
+    boardTitle = document.getElementById('place-url-title').value.trim();
+    if (!boardTitle) { toast('표시 제목을 입력하세요'); return; }
+    boardType = 'link';
+  } else if (activeTab === 'new') {
     const newTitle = document.getElementById('place-new-title').value.trim();
     if (!newTitle) { toast('새 보드 제목을 입력하세요'); return; }
     const newType = document.querySelector('input[name="place-new-type"]:checked')?.value || 'assignment';
@@ -2112,11 +2134,14 @@ window.confirmPlaceBoard = async function() {
   try {
     await Promise.all(days.map(day => {
       const slotId = `${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`;
-      return setDoc(doc(db, 'classes', currentClassAlias, 'slots', slotId), {
-        boardCode, weekStart, day, order: Date.now(),
+      const slotData = {
+        weekStart, day, order: Date.now(),
         title: boardTitle, type: boardType,
         createdAt: serverTimestamp()
-      });
+      };
+      if (externalUrl) slotData.externalUrl = externalUrl;
+      else slotData.boardCode = boardCode;
+      return setDoc(doc(db, 'classes', currentClassAlias, 'slots', slotId), slotData);
     }));
     toast(`${days.length}개 요일에 배치됨`);
     closeModal('place-board-modal');
