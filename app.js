@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, where, getCountFromServer } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-storage.js";
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, deleteUser, reauthenticateWithPopup } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
 
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -436,6 +436,57 @@ window.googleLogout = async function() {
   await signOut(auth);
   currentUserRole = null;
   showView('login-view');
+};
+
+window.withdrawAccount = async function() {
+  if (!currentUser) return;
+  if (!confirm('회원탈퇴 시 내가 만든 모든 보드, 클래스, 제출물, 업로드 파일이 영구 삭제됩니다.\n계속하시겠습니까?')) return;
+  if (!confirm('정말로 탈퇴하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
+  toast('탈퇴 처리 중...');
+  try {
+    // 1) 본인 소유 보드 전체 삭제 (서브컬렉션 + Storage 파일 포함)
+    const boardSnap = await getDocs(query(collection(db, 'boards'), where('ownerUid', '==', currentUser.uid)));
+    for (const b of boardSnap.docs) {
+      try { await deleteBoardData(b.id); } catch (e) { console.warn('board delete fail', b.id, e); }
+    }
+    // 2) 본인 소유 클래스 전체 삭제 (slots 포함)
+    const classSnap = await getDocs(query(collection(db, 'classes'), where('ownerUid', '==', currentUser.uid)));
+    for (const c of classSnap.docs) {
+      try {
+        const slots = await getDocs(collection(db, 'classes', c.id, 'slots'));
+        await Promise.all(slots.docs.map(s => deleteDoc(s.ref)));
+        await deleteDoc(c.ref);
+      } catch (e) { console.warn('class delete fail', c.id, e); }
+    }
+    // 3) users/{uid} 문서 삭제
+    try { await deleteDoc(doc(db, 'users', currentUser.uid)); } catch (e) { console.warn('user doc delete fail', e); }
+    // 4) Firebase Auth 계정 삭제 (필요 시 재인증)
+    try {
+      await deleteUser(currentUser);
+    } catch (e) {
+      if (e.code === 'auth/requires-recent-login') {
+        toast('보안을 위해 재인증이 필요합니다');
+        try {
+          await reauthenticateWithPopup(currentUser, new GoogleAuthProvider());
+          await deleteUser(currentUser);
+        } catch (e2) {
+          console.error(e2);
+          toast('재인증 실패: ' + (e2.message || ''));
+          return;
+        }
+      } else {
+        console.error(e);
+        toast('계정 삭제 실패: ' + (e.message || ''));
+        return;
+      }
+    }
+    currentUserRole = null;
+    toast('탈퇴 완료');
+    showView('login-view');
+  } catch (e) {
+    console.error(e);
+    toast('탈퇴 실패: ' + (e.message || ''));
+  }
 };
 
 const ADMIN_EMAIL = firebaseConfig.adminEmail || '';

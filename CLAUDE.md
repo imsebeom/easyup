@@ -320,6 +320,12 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
 - [x] 클래스 드래그 hover UX 정리
   - hover 시 actions `visibility:hidden`으로 공간 유지 → 카드 크기 고정
   - "📌 이 클래스에 배치" 배지를 `position:absolute`로 겹쳐 표시 (h3/alias는 그대로 유지)
+- [x] 교사 회원탈퇴 기능
+  - 대시보드 헤더 "회원탈퇴" 버튼 (2단계 confirm)
+  - `withdrawAccount()`: 본인 소유 보드 전체 → `deleteBoardData` (서브컬렉션·Storage 파일 포함) → 본인 클래스 + slots 삭제 → `users/{uid}` 삭제 → `deleteUser(currentUser)`
+  - `auth/requires-recent-login` 시 `reauthenticateWithPopup(GoogleAuthProvider)`로 재인증 후 재시도
+  - Firestore rules: `users/{userId}` 본인 `delete` 허용
+  - 학생은 계정 개념이 없으므로 탈퇴 불필요
 - [x] 클래스 슬롯 학생 노출 숨기기 기능
   - 슬롯 데이터에 `hidden` 필드 추가, 토글 시 `updateDoc({ hidden })`
   - 교사 뷰: 👁/🚫 버튼 + 점선 테두리 + "학생에게 숨김" 배지 + 빗금 배경
