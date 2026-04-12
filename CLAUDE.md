@@ -320,6 +320,11 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
 - [x] 클래스 드래그 hover UX 정리
   - hover 시 actions `visibility:hidden`으로 공간 유지 → 카드 크기 고정
   - "📌 이 클래스에 배치" 배지를 `position:absolute`로 겹쳐 표시 (h3/alias는 그대로 유지)
+- [x] 클래스 슬롯 학생 노출 숨기기 기능
+  - 슬롯 데이터에 `hidden` 필드 추가, 토글 시 `updateDoc({ hidden })`
+  - 교사 뷰: 👁/🚫 버튼 + 점선 테두리 + "학생에게 숨김" 배지 + 빗금 배경
+  - 학생 뷰: `renderWeekGrid` 진입부에서 `s.hidden` 슬롯 제외
+  - 테이블 모드도 동일 (취소선 + 흐림 처리)
 - [x] 클래스 슬롯에 외부 URL 게시 기능
   - 배치 모달에 "🔗 외부 URL" 탭 추가 (URL + 표시 제목 입력)
   - 슬롯 데이터: `externalUrl` 필드 (boardCode 대신), `type: 'link'`

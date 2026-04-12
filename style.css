@@ -406,6 +406,24 @@ body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',
 .class-slot-card[draggable="true"]:active { cursor:grabbing; }
 .class-slot-card.dragging { opacity:.4; }
 .class-slot-card:hover { border-color:var(--primary); box-shadow:0 2px 8px rgba(74,144,217,.15); }
+.class-slot-card.is-hidden {
+  background:repeating-linear-gradient(45deg, #f8fafc, #f8fafc 6px, #eef2f7 6px, #eef2f7 12px);
+  border-style:dashed; opacity:.75; position:relative;
+}
+.class-slot-card.is-hidden .class-slot-title,
+.class-slot-card.is-hidden .class-slot-icon { opacity:.55; }
+.class-slot-hidden-badge {
+  position:absolute; top:6px; right:8px;
+  background:#64748b; color:#fff; font-size:.65rem;
+  padding:2px 6px; border-radius:10px; font-weight:600;
+}
+.class-table-slot.is-hidden { opacity:.55; }
+.class-table-slot.is-hidden .class-table-slot-title { color:var(--text-light); text-decoration:line-through; }
+.btn-table-hide {
+  background:none; border:none; cursor:pointer;
+  padding:0 4px; font-size:.85rem; opacity:.6;
+}
+.btn-table-hide:hover { opacity:1; }
 .class-day-body.drop-hover {
   background:rgba(74,144,217,.08); border-radius:10px;
   outline:2px dashed var(--primary); outline-offset:-4px;

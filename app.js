@@ -1761,7 +1761,8 @@ function renderClassGrid() {
 /** Render a week × weekday grid. Shared by teacher (editable) and student (readonly) views. */
 function renderWeekGrid(container, weekStart, allSlots, isTeacher) {
   const today = getMondayStr(new Date()) === weekStart ? getTodayDayKey() : null;
-  const slotsThisWeek = allSlots.filter(s => s.weekStart === weekStart);
+  const visibleSlots = isTeacher ? allSlots : allSlots.filter(s => !s.hidden);
+  const slotsThisWeek = visibleSlots.filter(s => s.weekStart === weekStart);
   container.innerHTML = DAY_KEYS.map(day => {
     const slots = slotsThisWeek.filter(s => s.day === day).sort((a, b) => (a.order || 0) - (b.order || 0));
     const slotsHtml = slots.length
@@ -1772,11 +1773,14 @@ function renderWeekGrid(container, weekStart, allSlots, isTeacher) {
             const openBtn = s.externalUrl
               ? `<button class="btn btn-sm btn-secondary" onclick="window.open('${escapeHtml(s.externalUrl)}','_blank')">열기</button>`
               : `<button class="btn btn-sm btn-secondary" onclick="location.hash='board/${s.boardCode}'">열기</button>`;
-            return `<div class="class-slot-card" data-type="${s.type || ''}" data-slot-id="${escapeHtml(s.id)}" draggable="true">
+            const hideBtn = `<button class="btn btn-sm btn-secondary" onclick="toggleSlotHidden('${s.id}')" title="${s.hidden ? '학생에게 보이기' : '학생에게 숨기기'}">${s.hidden ? '🚫' : '👁'}</button>`;
+            return `<div class="class-slot-card${s.hidden ? ' is-hidden' : ''}" data-type="${s.type || ''}" data-slot-id="${escapeHtml(s.id)}" draggable="true">
+            ${s.hidden ? '<div class="class-slot-hidden-badge">학생에게 숨김</div>' : ''}
             <div class="class-slot-icon">${icon}</div>
             <div class="class-slot-title">${title}</div>
             <div class="class-slot-actions">
               ${openBtn}
+              ${hideBtn}
               <button class="btn btn-sm btn-danger" onclick="removeClassSlot('${s.id}')">✕</button>
             </div>
           </div>`;
@@ -1910,7 +1914,8 @@ function renderClassTable() {
             const link = s.externalUrl
               ? `<a href="${escapeHtml(s.externalUrl)}" target="_blank" rel="noopener" class="class-table-slot-title">${title}</a>`
               : `<a href="#board/${s.boardCode}" class="class-table-slot-title">${title}</a>`;
-            return `<div class="class-table-slot"><span>${icon}</span>${link}<button class="btn-table-del" onclick="removeClassSlot('${s.id}')" title="제거">✕</button></div>`;
+            const hideBtn = `<button class="btn-table-hide" onclick="toggleSlotHidden('${s.id}')" title="${s.hidden ? '학생에게 보이기' : '학생에게 숨기기'}">${s.hidden ? '🚫' : '👁'}</button>`;
+            return `<div class="class-table-slot${s.hidden ? ' is-hidden' : ''}"><span>${icon}</span>${link}${hideBtn}<button class="btn-table-del" onclick="removeClassSlot('${s.id}')" title="제거">✕</button></div>`;
           }).join('')
         : '<span class="class-table-empty">-</span>';
       return `<td class="${isToday ? 'class-table-today' : ''}">${slotsHtml}</td>`;
@@ -2154,6 +2159,17 @@ window.removeClassSlot = async function(slotId) {
     await deleteDoc(doc(db, 'classes', currentClassAlias, 'slots', slotId));
     toast('제거됨');
   } catch (e) { toast('실패'); }
+};
+
+window.toggleSlotHidden = async function(slotId) {
+  if (!currentClassAlias) return;
+  const slot = currentClassSlots.find(s => s.id === slotId);
+  if (!slot) return;
+  const next = !slot.hidden;
+  try {
+    await updateDoc(doc(db, 'classes', currentClassAlias, 'slots', slotId), { hidden: next });
+    toast(next ? '학생에게 숨김' : '학생에게 보임');
+  } catch (e) { console.error(e); toast('실패'); }
 };
 
 // ══════════════════════════════════════
