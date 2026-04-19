@@ -23,7 +23,8 @@
 
 ### 관리
 - 교사 대시보드: 보드 10개 기능 버튼(공유·QR·편집·복제·숨김·삭제 등), 레이아웃 고정 + 스크롤
-- 회원 승인제(`admin / approved / pending / rejected`), 회원탈퇴
+- **교사 회원 승인제**: Google 로그인 후 관리자 승인 필요 (`admin / approved / pending / rejected`), 회원탈퇴 지원
+- **학생 접속**: 로그인 없이 닉네임 입력만으로 참여 (localStorage의 deviceId로 본인 제출물·카드 식별)
 - 사용량 추적(보드 수 · 제출물 · Storage), 주간 비용 리포트 Cloud Function
 
 ## 기술 스택
