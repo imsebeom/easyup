@@ -1505,6 +1505,8 @@ function setupChatForBoard() {
     chatMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderChatTabs();
     renderChatMessages();
+    // 패널이 열려있고 현재 탭을 보고 있으면 즉시 읽음 처리
+    if (chatOpen) markChatThreadSeen(chatActiveThread);
     updateChatUnreadBadge();
   }, (err) => {
     console.error('chat listener error', err);
@@ -1716,22 +1718,54 @@ async function deleteChatMessage(msgId) {
   }
 }
 
+function countUnreadInThread(thread) {
+  try {
+    const seen = parseInt(localStorage.getItem(chatLastSeenKey(thread)) || '0', 10);
+    const teacher = isCurrentBoardTeacher();
+    const myDid = deviceId;
+    return chatMessages.reduce((n, m) => {
+      if (m.thread !== thread) return n;
+      const isMine = teacher ? m.isTeacher : (m.senderDeviceId === myDid);
+      if (isMine) return n;
+      const t = m.createdAt?.toMillis ? m.createdAt.toMillis() : 0;
+      return t > seen ? n + 1 : n;
+    }, 0);
+  } catch { return 0; }
+}
+
 function updateChatUnreadBadge() {
   const teacher = isCurrentBoardTeacher();
   const myDid = deviceId;
-  let unread = false;
-  // public
-  if (hasUnreadInThread('public')) unread = true;
-  // DM
+  let total = 0;
+  total += countUnreadInThread('public');
   if (teacher) {
     const participants = getChatParticipants();
-    for (const did of participants.keys()) {
-      if (hasUnreadInThread('dm:' + did)) { unread = true; break; }
-    }
+    for (const did of participants.keys()) total += countUnreadInThread('dm:' + did);
   } else {
-    if (hasUnreadInThread('dm:' + myDid)) unread = true;
+    total += countUnreadInThread('dm:' + myDid);
   }
-  document.querySelectorAll('.chat-unread-dot').forEach(d => d.style.display = unread ? '' : 'none');
+  // 채팅이 열려있고 현재 탭을 보고 있는 경우의 카운트는 즉시 0으로 처리
+  if (chatOpen) {
+    // 이미 markChatThreadSeen가 호출되어 localStorage 갱신됨 → 재계산
+    let rec = 0;
+    rec += countUnreadInThread('public');
+    if (teacher) {
+      const participants = getChatParticipants();
+      for (const did of participants.keys()) rec += countUnreadInThread('dm:' + did);
+    } else {
+      rec += countUnreadInThread('dm:' + myDid);
+    }
+    total = rec;
+  }
+
+  document.querySelectorAll('.chat-toggle-btn').forEach(btn => {
+    btn.classList.toggle('has-unread', total > 0);
+    const dot = btn.querySelector('.chat-unread-dot');
+    if (dot) {
+      dot.style.display = total > 0 ? '' : 'none';
+      dot.textContent = total > 99 ? '99+' : (total > 0 ? String(total) : '');
+    }
+  });
 }
 
 // Event delegation for chat panel (ES module defers past DOM parse, so elements exist)
