@@ -470,6 +470,7 @@
       </div>
       <div id="class-grid" class="class-grid"></div>
       <div id="class-table" class="class-table-wrap" style="display:none"></div>
+      <div class="class-chat-spacer"></div>
     </div>
 
     <!-- 학생: 클래스 공개 뷰 -->
@@ -490,6 +491,7 @@
         <button class="btn btn-small btn-secondary" onclick="classStudentWeekToday()">오늘</button>
       </div>
       <div id="class-student-grid" class="class-grid"></div>
+      <div class="class-chat-spacer"></div>
     </div>
 
     <!-- 클래스 생성 모달 -->
@@ -809,6 +811,35 @@
 
   <!-- 분류: 색상 피커 -->
   <div id="cl-color-picker" class="cl-color-picker" style="display:none"></div>
+
+  <!-- 클래스: 고정 우측 채팅 패널 -->
+  <aside id="class-chat-panel" class="class-chat-panel" style="display:none">
+    <div class="chat-panel-header">
+      <div class="chat-panel-title">
+        <span>💬 클래스 대화</span>
+        <span id="class-chat-thread-label" class="chat-thread-label"></span>
+      </div>
+      <div class="chat-panel-header-actions">
+        <button id="class-chat-public-toggle" class="chat-panel-close" style="display:none" onclick="toggleClassChatPublic()" title="전체 채팅 활성/비활성"></button>
+      </div>
+    </div>
+    <div id="class-chat-name-gate" class="class-chat-name-gate" style="display:none">
+      <div class="class-chat-name-gate-inner">
+        <p>대화에 참여하려면 이름을 입력하세요</p>
+        <input id="class-chat-name-input" type="text" placeholder="이름" maxlength="20">
+        <button class="btn btn-primary btn-small" onclick="submitClassChatName()">참여하기</button>
+      </div>
+    </div>
+    <div id="class-chat-tabs" class="chat-tabs"></div>
+    <div id="class-chat-thread-hint" class="chat-thread-hint" style="display:none"></div>
+    <div id="class-chat-messages" class="chat-messages">
+      <div class="chat-empty">대화를 불러오는 중...</div>
+    </div>
+    <div class="chat-composer">
+      <textarea id="class-chat-input" class="chat-input" rows="2" placeholder="메시지를 입력하세요 (Enter 전송)" maxlength="1000"></textarea>
+      <button id="class-chat-send-btn" class="chat-send-btn" onclick="sendClassChatMessage()">전송</button>
+    </div>
+  </aside>
 
   <!-- 과제 보드: 채팅 패널 -->
   <div id="chat-panel" class="chat-panel" style="display:none">

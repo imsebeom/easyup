@@ -357,4 +357,12 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - 비활성화 시 학생 public 입력창 disable + 빨간 안내 배너, 교사는 계속 전송 가능
   - 귓말(DM)은 항상 유지
   - Firestore rules: `messages create` 시 `thread=='public'`이면 `isOwner || chatPublicEnabled != false` 검사
+- [x] 클래스 고정 채팅 패널 (교사 `class-view` · 학생 `class-student-view`)
+  - 데이터: `classes/{alias}/messages/{id}` (보드 채팅과 동일 스키마)
+  - 우측 고정 사이드바(340px) — 토글 없이 항상 표시, 모바일은 하단 드로어(45vh)
+  - 학생 이름 게이트: `classes/{alias}` 진입 시 이름 입력 전에는 대화 읽기만, 이름 제출하면 전송 가능 + `members.{deviceId}` presence 등록
+  - localStorage 키: `easyup_class_name_{alias}`, `easyup_class_chat_seen_{alias}_{thread}`
+  - 교사 🔓/🔒 토글로 전체 채팅 on/off (`chatPublicEnabled`)
+  - 교사 귓말(DM) + `+ 귓말 시작…` 드롭다운 (접속만 한 학생 포함)
+  - Firestore rules: `classes/{alias}` `members` 필드만 비인증 update 허용, `messages` read 공개, create 1000자·chatPublicEnabled 검사, update/delete는 ownerUid만
 - [ ] 모바일 반응형 테스트

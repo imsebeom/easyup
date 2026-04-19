@@ -423,6 +423,8 @@ window.showView = function(viewId) {
   if (unsubscribeBoardDoc && viewId !== 'gallery-view' && viewId !== 'inquiry-gallery-view') { unsubscribeBoardDoc(); unsubscribeBoardDoc = null; }
   // 채팅은 과제 수합 보드(gallery-view/board-view)에서만 유효
   if (viewId !== 'gallery-view' && viewId !== 'board-view') { cleanupChat(); }
+  // 클래스 채팅은 클래스 뷰에서만 유효
+  if (viewId !== 'class-view' && viewId !== 'class-student-view') { cleanupClassChat(); }
   if (viewId === 'users-view') loadUsers();
 };
 
@@ -2271,6 +2273,8 @@ async function showClassTeacher(alias) {
         else renderClassTable();
       }
     });
+
+    setupClassChat(alias, true);
   } catch (e) { console.error(e); toast('오류: ' + e.message); }
 }
 
@@ -2732,6 +2736,8 @@ async function showClassStudent(alias) {
         renderClassStudentView();
       }
     );
+
+    setupClassChat(alias, false);
   } catch (e) { console.error(e); toast('불러오기 실패'); }
 }
 
@@ -2752,6 +2758,396 @@ window.classStudentWeekToday = function() {
   studentClassWeekStart = getMondayStr(new Date());
   renderClassStudentView();
 };
+
+// ══════════════════════════════════════
+//  CLASS CHAT (고정 우측 패널)
+// ══════════════════════════════════════
+let unsubscribeClassChat = null;
+let unsubscribeClassChatDoc = null;
+let classChatMessages = [];
+let classChatActiveThread = 'public';
+let classChatContext = null; // { alias, isTeacher, data }
+
+function classChatNameKey(alias) { return `easyup_class_name_${alias}`; }
+function classChatSeenKey(alias, thread) { return `easyup_class_chat_seen_${alias}_${thread}`; }
+
+function getClassChatName() {
+  if (!classChatContext) return '';
+  if (classChatContext.isTeacher) {
+    return (currentUser?.displayName || currentUser?.email || '교사');
+  }
+  return localStorage.getItem(classChatNameKey(classChatContext.alias)) || '';
+}
+
+function isClassChatTeacher() { return !!classChatContext?.isTeacher; }
+
+function getClassChatParticipants() {
+  const map = new Map();
+  const data = classChatContext?.data || {};
+  if (data.members && typeof data.members === 'object') {
+    for (const [did, info] of Object.entries(data.members)) {
+      if (info?.name) map.set(did, info.name);
+    }
+  }
+  for (const m of classChatMessages) {
+    if (!m.isTeacher && m.senderDeviceId && m.senderName) map.set(m.senderDeviceId, m.senderName);
+    if (m.targetDeviceId && m.targetName && !map.has(m.targetDeviceId)) map.set(m.targetDeviceId, m.targetName);
+  }
+  if (!isClassChatTeacher()) map.delete(deviceId);
+  return map;
+}
+
+function markClassChatSeen(thread) {
+  try {
+    const latest = classChatMessages.reduce((acc, m) => {
+      if (m.thread !== thread) return acc;
+      const t = m.createdAt?.toMillis ? m.createdAt.toMillis() : 0;
+      return t > acc ? t : acc;
+    }, 0);
+    if (latest > 0 && classChatContext) localStorage.setItem(classChatSeenKey(classChatContext.alias, thread), String(latest));
+  } catch (_) {}
+}
+
+function countClassChatUnread(thread) {
+  if (!classChatContext) return 0;
+  try {
+    const seen = parseInt(localStorage.getItem(classChatSeenKey(classChatContext.alias, thread)) || '0', 10);
+    const teacher = isClassChatTeacher();
+    return classChatMessages.reduce((n, m) => {
+      if (m.thread !== thread) return n;
+      const isMine = teacher ? m.isTeacher : (m.senderDeviceId === deviceId);
+      if (isMine) return n;
+      const t = m.createdAt?.toMillis ? m.createdAt.toMillis() : 0;
+      return t > seen ? n + 1 : n;
+    }, 0);
+  } catch { return 0; }
+}
+
+function setupClassChat(alias, isTeacher) {
+  if (!alias) { cleanupClassChat(); return; }
+  classChatContext = { alias, isTeacher, data: {} };
+  classChatMessages = [];
+  classChatActiveThread = 'public';
+  const panel = document.getElementById('class-chat-panel');
+  if (panel) panel.style.display = 'flex';
+  document.body.classList.add('class-chat-active');
+
+  if (unsubscribeClassChat) unsubscribeClassChat();
+  if (unsubscribeClassChatDoc) unsubscribeClassChatDoc();
+
+  // 메시지 실시간 수신
+  const q = query(collection(db, 'classes', alias, 'messages'), orderBy('createdAt', 'asc'));
+  unsubscribeClassChat = onSnapshot(q, (snap) => {
+    classChatMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderClassChatTabs();
+    renderClassChatMessages();
+    markClassChatSeen(classChatActiveThread);
+  }, (err) => console.error('class chat listener error', err));
+
+  // 클래스 doc (members/chatPublicEnabled) 실시간 수신
+  unsubscribeClassChatDoc = onSnapshot(doc(db, 'classes', alias), (snap) => {
+    if (!snap.exists()) return;
+    if (!classChatContext) return;
+    classChatContext.data = snap.data();
+    renderClassChatTabs();
+    renderClassChatMessages();
+  });
+
+  // 학생 이름 게이트 처리 및 presence 등록
+  refreshClassChatNameGate();
+  if (!isTeacher && getClassChatName()) registerClassStudentPresence();
+}
+
+function cleanupClassChat() {
+  if (unsubscribeClassChat) { unsubscribeClassChat(); unsubscribeClassChat = null; }
+  if (unsubscribeClassChatDoc) { unsubscribeClassChatDoc(); unsubscribeClassChatDoc = null; }
+  classChatMessages = [];
+  classChatActiveThread = 'public';
+  classChatContext = null;
+  const panel = document.getElementById('class-chat-panel');
+  if (panel) panel.style.display = 'none';
+  document.body.classList.remove('class-chat-active');
+}
+
+async function registerClassStudentPresence() {
+  if (!classChatContext || classChatContext.isTeacher) return;
+  const name = getClassChatName();
+  if (!name) return;
+  try {
+    await updateDoc(doc(db, 'classes', classChatContext.alias), {
+      [`members.${deviceId}`]: { name, lastSeen: serverTimestamp() },
+    });
+  } catch (e) {
+    console.warn('class presence skipped', e?.message || e);
+  }
+}
+
+function refreshClassChatNameGate() {
+  const gate = document.getElementById('class-chat-name-gate');
+  const composer = document.querySelector('#class-chat-panel .chat-composer');
+  const tabs = document.getElementById('class-chat-tabs');
+  const messages = document.getElementById('class-chat-messages');
+  if (!gate || !composer) return;
+  const teacher = isClassChatTeacher();
+  const name = getClassChatName();
+  if (!teacher && !name) {
+    gate.style.display = '';
+    composer.style.display = 'none';
+    if (tabs) tabs.style.display = 'none';
+    if (messages) messages.innerHTML = '<div class="chat-empty">이름을 입력하면 대화에 참여할 수 있어요.<br>다른 참여자의 메시지는 자유롭게 읽을 수 있습니다.</div>';
+    renderClassChatMessagesReadOnly();
+  } else {
+    gate.style.display = 'none';
+    composer.style.display = '';
+    if (tabs) tabs.style.display = '';
+  }
+}
+
+window.submitClassChatName = function() {
+  const input = document.getElementById('class-chat-name-input');
+  const name = (input?.value || '').trim();
+  if (!name) { toast('이름을 입력하세요'); return; }
+  if (!classChatContext) return;
+  localStorage.setItem(classChatNameKey(classChatContext.alias), name);
+  refreshClassChatNameGate();
+  registerClassStudentPresence();
+  renderClassChatTabs();
+  renderClassChatMessages();
+  document.getElementById('class-chat-input')?.focus();
+};
+
+function updateClassChatPublicToggleUi() {
+  const btn = document.getElementById('class-chat-public-toggle');
+  if (!btn) return;
+  const teacher = isClassChatTeacher();
+  if (!teacher) { btn.style.display = 'none'; return; }
+  btn.style.display = '';
+  const enabled = classChatContext?.data?.chatPublicEnabled !== false;
+  btn.textContent = enabled ? '🔓' : '🔒';
+  btn.title = enabled ? '전체 채팅 잠그기 (학생 전송 차단)' : '전체 채팅 열기';
+  btn.classList.toggle('locked', !enabled);
+}
+
+function updateClassChatComposerState() {
+  const input = document.getElementById('class-chat-input');
+  const btn = document.getElementById('class-chat-send-btn');
+  const hint = document.getElementById('class-chat-thread-hint');
+  if (!input || !btn) return;
+  const teacher = isClassChatTeacher();
+  const publicEnabled = classChatContext?.data?.chatPublicEnabled !== false;
+  const isPublic = classChatActiveThread === 'public';
+  const blocked = isPublic && !teacher && !publicEnabled;
+
+  input.disabled = blocked;
+  btn.disabled = blocked;
+  input.placeholder = blocked ? '교사가 전체 채팅을 잠갔습니다' : '메시지를 입력하세요 (Enter 전송, Shift+Enter 줄바꿈)';
+
+  const noticeId = 'class-chat-disabled-notice';
+  let notice = document.getElementById(noticeId);
+  const showNotice = isPublic && !publicEnabled;
+  if (showNotice) {
+    if (!notice) {
+      notice = document.createElement('div');
+      notice.id = noticeId;
+      notice.className = 'chat-disabled-notice';
+      hint?.after(notice);
+    }
+    notice.textContent = teacher
+      ? '🔒 전체 채팅이 잠겨 있습니다. 학생은 메시지를 보낼 수 없습니다.'
+      : '🔒 교사가 전체 채팅을 잠갔습니다. 교사에게 귓말로 문의하세요.';
+    notice.style.display = '';
+  } else if (notice) { notice.style.display = 'none'; }
+}
+
+window.toggleClassChatPublic = async function() {
+  if (!isClassChatTeacher() || !classChatContext) return;
+  const next = !(classChatContext.data?.chatPublicEnabled !== false);
+  try {
+    await updateDoc(doc(db, 'classes', classChatContext.alias), { chatPublicEnabled: next });
+    toast(next ? '전체 채팅을 열었습니다' : '전체 채팅을 잠갔습니다');
+  } catch (e) { console.error(e); toast('변경 실패'); }
+};
+
+function renderClassChatTabs() {
+  const tabsEl = document.getElementById('class-chat-tabs');
+  const labelEl = document.getElementById('class-chat-thread-label');
+  const hintEl = document.getElementById('class-chat-thread-hint');
+  if (!tabsEl) return;
+  updateClassChatPublicToggleUi();
+  const teacher = isClassChatTeacher();
+  const participants = getClassChatParticipants();
+
+  const tabs = [{ thread: 'public', label: '🌐 전체', unread: countClassChatUnread('public') }];
+  if (teacher) {
+    for (const [did, name] of participants) {
+      tabs.push({ thread: 'dm:' + did, label: `🔒 ${name}`, unread: countClassChatUnread('dm:' + did) });
+    }
+  } else {
+    const myThread = 'dm:' + deviceId;
+    const hasDM = classChatMessages.some(m => m.thread === myThread);
+    if (hasDM) tabs.push({ thread: myThread, label: '🔒 교사 1:1', unread: countClassChatUnread(myThread) });
+  }
+
+  if (!tabs.some(t => t.thread === classChatActiveThread)) classChatActiveThread = 'public';
+
+  tabsEl.innerHTML = tabs.map(t => `
+    <button class="chat-tab ${t.thread === classChatActiveThread ? 'active' : ''}" data-thread="${escapeHtml(t.thread)}">
+      ${escapeHtml(t.label)}${t.unread > 0 && t.thread !== classChatActiveThread ? '<span class="chat-tab-dot"></span>' : ''}
+    </button>
+  `).join('');
+
+  if (teacher && participants.size > 0) {
+    const opts = ['<option value="">+ 귓말 시작…</option>']
+      .concat(Array.from(participants.entries()).map(([did, name]) =>
+        `<option value="${escapeHtml('dm:' + did)}">${escapeHtml(name)}에게 귓말</option>`))
+      .join('');
+    tabsEl.insertAdjacentHTML('beforeend',
+      `<select class="chat-tab" style="padding:6px 8px" onchange="if(this.value){switchClassChatThread(this.value);this.selectedIndex=0;}">${opts}</select>`);
+  }
+
+  if (classChatActiveThread === 'public') {
+    labelEl.textContent = '';
+    hintEl.style.display = 'none';
+  } else {
+    const did = classChatActiveThread.slice(3);
+    const name = participants.get(did) || (did === deviceId ? '나' : '');
+    if (teacher) {
+      labelEl.textContent = `🔒 ${name}님과 1:1`;
+      hintEl.textContent = '이 메시지는 해당 학생에게만 보입니다.';
+    } else {
+      labelEl.textContent = '🔒 교사와 1:1';
+      hintEl.textContent = '이 메시지는 교사에게만 보입니다.';
+    }
+    hintEl.style.display = '';
+  }
+  updateClassChatComposerState();
+}
+
+function renderClassChatMessagesReadOnly() {
+  // 이름 게이트 상태에서도 전체 대화를 읽을 수 있도록 렌더 (이벤트 핸들러 없음)
+  renderClassChatMessages();
+}
+
+function renderClassChatMessages() {
+  const body = document.getElementById('class-chat-messages');
+  if (!body) return;
+  const teacher = isClassChatTeacher();
+  let list;
+  if (classChatActiveThread === 'public') {
+    list = classChatMessages.filter(m => m.thread === 'public');
+  } else {
+    const targetDid = classChatActiveThread.slice(3);
+    if (!teacher && targetDid !== deviceId) list = [];
+    else list = classChatMessages.filter(m => m.thread === classChatActiveThread);
+  }
+  if (list.length === 0) {
+    body.innerHTML = '<div class="chat-empty">아직 메시지가 없습니다</div>';
+    return;
+  }
+  body.innerHTML = list.map(m => {
+    const isMine = teacher ? m.isTeacher : (m.senderDeviceId === deviceId);
+    const time = m.createdAt?.toDate ? formatDateShort(m.createdAt.toDate()) : '';
+    const klass = [
+      'chat-msg',
+      isMine ? 'chat-msg-mine' : '',
+      m.isTeacher && !isMine ? 'chat-msg-teacher' : '',
+      m.thread !== 'public' ? 'chat-msg-dm' : '',
+    ].filter(Boolean).join(' ');
+    const teacherBadge = m.isTeacher ? ' 👨‍🏫' : '';
+    const actions = teacher ? `<div class="chat-msg-actions">
+      <button class="chat-msg-act-btn" data-msg-id="${escapeHtml(m.id)}" data-action="delete" title="삭제">🗑</button>
+    </div>` : '';
+    return `<div class="${klass}" data-msg-id="${escapeHtml(m.id)}">
+      <div class="chat-msg-meta">
+        <span class="chat-msg-name">${escapeHtml(m.senderName || '')}${teacherBadge}</span>
+        <span class="chat-msg-time">${time}</span>
+      </div>
+      <div class="chat-msg-text">${escapeHtml(m.text || '')}</div>
+      ${actions}
+    </div>`;
+  }).join('');
+  body.scrollTop = body.scrollHeight;
+}
+
+window.switchClassChatThread = function(thread) {
+  classChatActiveThread = thread;
+  renderClassChatTabs();
+  renderClassChatMessages();
+  markClassChatSeen(thread);
+  setTimeout(() => {
+    const body = document.getElementById('class-chat-messages');
+    if (body) body.scrollTop = body.scrollHeight;
+    document.getElementById('class-chat-input')?.focus();
+  }, 30);
+};
+
+window.sendClassChatMessage = async function() {
+  const input = document.getElementById('class-chat-input');
+  if (!input) return;
+  const text = (input.value || '').trim();
+  if (!text) return;
+  if (text.length > 1000) { toast('1000자 이내로 입력하세요'); return; }
+  if (!classChatContext) return;
+
+  const teacher = isClassChatTeacher();
+  const senderName = getClassChatName();
+  if (!teacher && !senderName) { toast('먼저 이름을 입력하세요'); return; }
+
+  let thread = classChatActiveThread;
+  let targetDeviceId = null;
+  let targetName = null;
+  if (thread !== 'public') {
+    targetDeviceId = thread.slice(3);
+    const participants = getClassChatParticipants();
+    targetName = participants.get(targetDeviceId) || null;
+    if (!teacher && targetDeviceId !== deviceId) { toast('권한이 없습니다'); return; }
+  }
+  if (thread === 'public' && !teacher && classChatContext.data?.chatPublicEnabled === false) {
+    toast('교사가 전체 채팅을 잠갔습니다');
+    return;
+  }
+
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    await setDoc(doc(db, 'classes', classChatContext.alias, 'messages', id), {
+      text,
+      senderName,
+      senderDeviceId: deviceId,
+      senderUid: teacher ? (currentUser?.uid || null) : null,
+      isTeacher: !!teacher,
+      thread,
+      targetDeviceId,
+      targetName,
+      createdAt: serverTimestamp(),
+    });
+    input.value = '';
+    markClassChatSeen(thread);
+  } catch (e) { console.error(e); toast('메시지 전송 실패'); }
+};
+
+async function deleteClassChatMessage(msgId) {
+  if (!msgId || !classChatContext) return;
+  if (!confirm('이 메시지를 삭제하시겠습니까?')) return;
+  try {
+    await deleteDoc(doc(db, 'classes', classChatContext.alias, 'messages', msgId));
+  } catch (e) { console.error(e); toast('삭제 실패'); }
+}
+
+// Event delegation for class chat
+document.getElementById('class-chat-tabs')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.chat-tab');
+  if (btn?.dataset.thread) window.switchClassChatThread(btn.dataset.thread);
+});
+document.getElementById('class-chat-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); window.sendClassChatMessage(); }
+});
+document.getElementById('class-chat-name-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); window.submitClassChatName(); }
+});
+document.getElementById('class-chat-messages')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.chat-msg-act-btn');
+  if (btn?.dataset.action === 'delete') deleteClassChatMessage(btn.dataset.msgId);
+});
 
 // ══════════════════════════════════════
 //  TEACHER: DASHBOARD

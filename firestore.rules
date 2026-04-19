@@ -23,11 +23,32 @@ service cloud.firestore {
     match /classes/{alias} {
       allow read: if true;
       allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && request.auth.uid == resource.data.ownerUid;
+      // 클래스 소유자 또는, 학생 presence(members 필드)만 제한적으로 업데이트 허용
+      allow update: if (request.auth != null && request.auth.uid == resource.data.ownerUid)
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']);
+      allow delete: if request.auth != null && request.auth.uid == resource.data.ownerUid;
 
       match /slots/{slotId} {
         allow read: if true;
         allow write: if request.auth != null
+          && request.auth.uid == get(/databases/$(database)/documents/classes/$(alias)).data.ownerUid;
+      }
+
+      // 클래스 채팅 메시지 (전체 채팅 + 교사 귓말)
+      match /messages/{messageId} {
+        allow read: if true;
+        // 1000자 이하, thread 필수. chatPublicEnabled=false면 학생은 public 전송 불가 (교사는 항상 가능)
+        allow create: if request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.thread is string
+          && (
+            (request.auth != null && request.auth.uid == get(/databases/$(database)/documents/classes/$(alias)).data.ownerUid)
+            || request.resource.data.thread != 'public'
+            || get(/databases/$(database)/documents/classes/$(alias)).data.chatPublicEnabled != false
+          );
+        // Update/Delete: 클래스 소유자(교사)만
+        allow update, delete: if request.auth != null
           && request.auth.uid == get(/databases/$(database)/documents/classes/$(alias)).data.ownerUid;
       }
     }
