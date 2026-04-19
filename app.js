@@ -1434,6 +1434,7 @@ document.getElementById('detail-modal').addEventListener('keydown', (e) => {
 //  BOARD CHAT (과제 보드: 전체 채팅 + 교사 귓말)
 // ══════════════════════════════════════
 let unsubscribeChat = null;
+let unsubscribeChatBoardDoc = null;
 let chatMessages = [];
 let chatActiveThread = 'public';
 let chatOpen = false;
@@ -1444,6 +1445,12 @@ function chatLastSeenKey(thread) {
 
 function getChatParticipants() {
   const map = new Map(); // deviceId -> name
+  // 보드 members (접속 등록된 학생 명부 — 제출/채팅 전에도 포함)
+  if (currentBoard?.members && typeof currentBoard.members === 'object') {
+    for (const [did, info] of Object.entries(currentBoard.members)) {
+      if (info?.name) map.set(did, info.name);
+    }
+  }
   // 제출물에서 참여자 수집
   for (const d of galleryDocs || []) {
     try {
@@ -1459,6 +1466,24 @@ function getChatParticipants() {
   // 본인(학생)은 탭에서 제외
   if (!isCurrentBoardTeacher()) map.delete(deviceId);
   return map;
+}
+
+// 학생 접속 시 보드 members에 등록 (교사가 귓말 걸 수 있도록)
+async function registerStudentPresence() {
+  if (!currentBoardCode || !studentName) return;
+  if (isCurrentBoardTeacher()) return;
+  if (currentBoard?.status !== 'active') return; // rules상 active 보드만 members 업데이트 허용
+  try {
+    await updateDoc(doc(db, 'boards', currentBoardCode), {
+      [`members.${deviceId}`]: {
+        name: studentName,
+        lastSeen: serverTimestamp(),
+      },
+    });
+  } catch (e) {
+    // 권한/네트워크 이슈면 조용히 스킵 (채팅 본체 기능에는 영향 없음)
+    console.warn('presence register skipped', e?.message || e);
+  }
 }
 
 function chatThreadForStudent() { return `dm:${deviceId}`; }
@@ -1498,8 +1523,11 @@ function setupChatForBoard() {
   }
   document.querySelectorAll('.chat-toggle-btn').forEach(b => b.style.display = '');
   if (unsubscribeChat) unsubscribeChat();
+  if (unsubscribeChatBoardDoc) unsubscribeChatBoardDoc();
   chatMessages = [];
   chatActiveThread = 'public';
+
+  // 메시지 실시간 수신
   const q = query(collection(db, 'boards', currentBoardCode, 'messages'), orderBy('createdAt', 'asc'));
   unsubscribeChat = onSnapshot(q, (snap) => {
     chatMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -1511,10 +1539,25 @@ function setupChatForBoard() {
   }, (err) => {
     console.error('chat listener error', err);
   });
+
+  // 보드 doc 실시간 수신 — members/chatPublicEnabled 변경 반영
+  unsubscribeChatBoardDoc = onSnapshot(doc(db, 'boards', currentBoardCode), (snap) => {
+    if (!snap.exists()) return;
+    const data = snap.data();
+    currentBoard.members = data.members || {};
+    currentBoard.chatPublicEnabled = data.chatPublicEnabled !== false; // default: true
+    currentBoard.status = data.status;
+    renderChatTabs();
+    renderChatMessages();
+  });
+
+  // 학생 접속 presence 등록
+  if (!isCurrentBoardTeacher()) registerStudentPresence();
 }
 
 function cleanupChat() {
   if (unsubscribeChat) { unsubscribeChat(); unsubscribeChat = null; }
+  if (unsubscribeChatBoardDoc) { unsubscribeChatBoardDoc(); unsubscribeChatBoardDoc = null; }
   chatMessages = [];
   chatActiveThread = 'public';
   chatOpen = false;
@@ -1561,6 +1604,68 @@ window.switchChatThread = function(thread) {
   }, 30);
 };
 
+function updateChatPublicToggleUi() {
+  const btn = document.getElementById('chat-public-toggle');
+  if (!btn) return;
+  const teacher = isCurrentBoardTeacher();
+  if (!teacher) { btn.style.display = 'none'; return; }
+  btn.style.display = '';
+  const enabled = currentBoard?.chatPublicEnabled !== false;
+  btn.textContent = enabled ? '🔓' : '🔒';
+  btn.title = enabled ? '전체 채팅 잠그기 (학생 전송 차단)' : '전체 채팅 열기';
+  btn.classList.toggle('locked', !enabled);
+}
+
+function updateChatComposerState() {
+  const input = document.getElementById('chat-input');
+  const btn = document.getElementById('chat-send-btn');
+  const hint = document.getElementById('chat-thread-hint');
+  if (!input || !btn) return;
+  const teacher = isCurrentBoardTeacher();
+  const publicEnabled = currentBoard?.chatPublicEnabled !== false;
+  const isPublic = chatActiveThread === 'public';
+  const blocked = isPublic && !teacher && !publicEnabled;
+
+  input.disabled = blocked;
+  btn.disabled = blocked;
+  if (blocked) {
+    input.placeholder = '교사가 전체 채팅을 잠갔습니다';
+  } else {
+    input.placeholder = '메시지를 입력하세요 (Enter로 전송, Shift+Enter 줄바꿈)';
+  }
+
+  // 공개 탭에서 비활성 상태이면 알림 표시
+  const noticeId = 'chat-disabled-notice';
+  let notice = document.getElementById(noticeId);
+  const showNotice = isPublic && !publicEnabled;
+  if (showNotice) {
+    if (!notice) {
+      notice = document.createElement('div');
+      notice.id = noticeId;
+      notice.className = 'chat-disabled-notice';
+      hint?.after(notice);
+    }
+    notice.textContent = teacher
+      ? '🔒 전체 채팅이 잠겨 있습니다. 학생은 메시지를 보낼 수 없습니다. (교사는 전송 가능)'
+      : '🔒 교사가 전체 채팅을 잠갔습니다. 교사에게 귓말로 문의하세요.';
+    notice.style.display = '';
+  } else if (notice) {
+    notice.style.display = 'none';
+  }
+}
+
+window.toggleChatPublic = async function() {
+  if (!isCurrentBoardTeacher() || !currentBoardCode) return;
+  const next = !(currentBoard?.chatPublicEnabled !== false);
+  try {
+    await updateDoc(doc(db, 'boards', currentBoardCode), { chatPublicEnabled: next });
+    toast(next ? '전체 채팅을 열었습니다' : '전체 채팅을 잠갔습니다');
+  } catch (e) {
+    console.error(e);
+    toast('변경 실패');
+  }
+};
+
 function renderChatTabs() {
   const tabsEl = document.getElementById('chat-tabs');
   const labelEl = document.getElementById('chat-thread-label');
@@ -1568,6 +1673,7 @@ function renderChatTabs() {
   if (!tabsEl) return;
   const teacher = isCurrentBoardTeacher();
   const participants = getChatParticipants();
+  updateChatPublicToggleUi();
 
   const tabs = [];
   tabs.push({ thread: 'public', label: '🌐 전체', unread: hasUnreadInThread('public') });
@@ -1618,6 +1724,7 @@ function renderChatTabs() {
     }
     hintEl.style.display = '';
   }
+  updateChatComposerState();
 }
 
 function renderChatMessages() {
@@ -1682,6 +1789,12 @@ window.sendChatMessage = async function() {
     targetName = participants.get(targetDeviceId) || null;
     // 학생은 본인 DM 스레드(dm:myDeviceId)에서만 전송 가능
     if (!teacher && targetDeviceId !== deviceId) { toast('권한이 없습니다'); return; }
+  }
+
+  // 전체 채팅 비활성화 상태에서 학생이 public 메시지 전송 차단
+  if (thread === 'public' && !teacher && currentBoard?.chatPublicEnabled === false) {
+    toast('교사가 전체 채팅을 잠갔습니다');
+    return;
   }
 
   if (!teacher && !studentName) { toast('먼저 이름을 설정하세요'); return; }

@@ -340,11 +340,21 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - 데이터: `boards/{code}/messages/{id}` — `text, senderName, senderDeviceId, senderUid?, isTeacher, thread('public'|'dm:{deviceId}'), targetDeviceId?, targetName?, createdAt`
   - 우측 고정 패널(360px), 토글 버튼(`💬 대화`)으로 슬라이드 오픈, 모바일에서 전체화면
   - 학생 탭: `전체` + 본인 DM 있을 때 `교사 1:1` 자동 표시
-  - 교사 탭: `전체` + 참여자별 `🔒 이름` 개별 탭 + `+ 귓말 시작…` 드롭다운(제출자·채팅 작성자 모두 대상)
+  - 교사 탭: `전체` + 참여자별 `🔒 이름` 개별 탭 + `+ 귓말 시작…` 드롭다운(제출자·채팅 작성자·접속만 한 학생 모두 대상)
   - 전체 히스토리: `orderBy createdAt asc`, 늦게 접속해도 전부 표시
-  - Unread dot: localStorage `easyup_chat_seen_{code}_{thread}` 기반, 탭·헤더 버튼 모두 표시
+  - Unread 배지: localStorage `easyup_chat_seen_{code}_{thread}` 기반, 버튼에 개수 + pulse 애니메이션
   - 교사만 메시지 삭제 가능 (rules: `update, delete: isOwner(boardCode)`)
   - rules: private 보드는 교사만 read, open 보드에서 누구나 create(1000자·thread 필수)
   - 진입: `showGallery()`·`openBoard()` 내부에서 `setupChatForBoard()`, `showView` 전환 시 `cleanupChat()`
-  - 제출물 실시간 갱신 시 참여자 탭도 자동 재렌더
+  - 제출물/보드 doc 실시간 갱신 시 참여자 탭도 자동 재렌더
+- [x] 과제 보드 학생 Presence 등록
+  - 학생이 과제 보드 진입 시 `boards/{code}` `members.{deviceId} = { name, lastSeen }` 자동 기록
+  - 기존 Firestore rule(active 보드의 `members`/`groups` 업데이트 비인증 허용)을 그대로 활용
+  - 교사는 채팅 탭 `+ 귓말 시작…` 드롭다운에서 제출·채팅 전에 접속만 한 학생에게도 귓말 가능
+  - `setupChatForBoard`가 보드 doc onSnapshot으로 members 변경을 실시간 반영 → 탭 즉시 갱신
+- [x] 전체 채팅 on/off (교사 제어)
+  - 보드 필드 `chatPublicEnabled` (default: true), 채팅 패널 헤더 🔓/🔒 버튼(교사만 노출)
+  - 비활성화 시 학생 public 입력창 disable + 빨간 안내 배너, 교사는 계속 전송 가능
+  - 귓말(DM)은 항상 유지
+  - Firestore rules: `messages create` 시 `thread=='public'`이면 `isOwner || chatPublicEnabled != false` 검사
 - [ ] 모바일 반응형 테스트

@@ -1327,8 +1327,12 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 }
 .chat-panel-title { display:flex; align-items:center; gap:8px; font-weight:700; color:var(--primary); font-size:1rem; }
 .chat-thread-label { font-size:.8rem; color:var(--text-light); font-weight:500; }
+.chat-panel-header-actions { display:flex; align-items:center; gap:4px; }
 .chat-panel-close { background:none; border:none; font-size:1.1rem; cursor:pointer; color:var(--text-light); padding:4px 8px; border-radius:6px; }
 .chat-panel-close:hover { background:rgba(0,0,0,.05); color:var(--text); }
+#chat-public-toggle { font-size:.9rem; }
+#chat-public-toggle.locked { color:var(--danger); }
+.chat-disabled-notice { padding:10px 14px; font-size:.82rem; color:var(--danger); background:#fef2f2; border-bottom:1px solid #fecaca; text-align:center; }
 
 .chat-tabs {
   display:flex; gap:4px; padding:8px 12px;

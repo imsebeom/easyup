@@ -817,7 +817,10 @@
         <span>💬 대화</span>
         <span id="chat-thread-label" class="chat-thread-label"></span>
       </div>
-      <button class="chat-panel-close" onclick="toggleChatPanel()" title="닫기">✕</button>
+      <div class="chat-panel-header-actions">
+        <button id="chat-public-toggle" class="chat-panel-close" style="display:none" onclick="toggleChatPublic()" title="전체 채팅 활성/비활성"></button>
+        <button class="chat-panel-close" onclick="toggleChatPanel()" title="닫기">✕</button>
+      </div>
     </div>
     <div id="chat-tabs" class="chat-tabs"></div>
     <div id="chat-thread-hint" class="chat-thread-hint" style="display:none"></div>

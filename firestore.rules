@@ -72,11 +72,17 @@ service cloud.firestore {
         allow read: if get(/databases/$(database)/documents/boards/$(boardCode)).data.status != 'private'
           || isOwner(boardCode);
         // Create: active 보드에서는 누구나, closed여도 교사는 가능. 본문 길이 제한.
+        // chatPublicEnabled=false면 학생은 public 스레드에 보내지 못함 (교사는 항상 가능).
         allow create: if (isBoardOpen(boardCode) || isOwner(boardCode))
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 1000
-          && request.resource.data.thread is string;
+          && request.resource.data.thread is string
+          && (
+            isOwner(boardCode)
+            || request.resource.data.thread != 'public'
+            || get(/databases/$(database)/documents/boards/$(boardCode)).data.chatPublicEnabled != false
+          );
         // Update/Delete: 교사(보드 소유자)만. 학생은 본인 메시지라도 서버 규칙에서 검증 불가.
         allow update, delete: if isOwner(boardCode);
       }
