@@ -2,8 +2,6 @@
 
 초등 교실용 과제·질문·분류·클래스 관리 웹앱. Padlet 대안으로, 교사가 보드를 만들고 학생은 로그인 없이 참여합니다.
 
-🌐 **https://eleup.kr**
-
 ## 주요 기능
 
 ### 보드 3종
@@ -12,7 +10,7 @@
 - **🗂 분류하기** — 트리 / 폴더 / 책 3가지 뷰, 개인·모둠 모드, 이미지 카드, 읽기 전용 공개 QR 링크(`#book/CODE/WS`) 및 책자 인쇄
 
 ### 클래스 (주간 캘린더)
-- `eleup.kr/mrkim` 같은 짧은 경로로 학생 공개 뷰
+- alias 기반 짧은 경로(`/<alias>`)로 학생 공개 뷰
 - 교사가 주간 그리드에 보드 배치(드래그&드롭, 날짜 피커, 외부 URL 게시)
 - 슬롯 학생 노출 숨기기(👁/🚫), 테이블 모드(모든 주차 한눈에)
 
@@ -32,7 +30,6 @@
 
 - **프론트엔드**: Vanilla HTML/CSS/JS (ES Module), 빌드 도구 없음
 - **백엔드**: Firebase (Firestore + Storage + Hosting + Auth + Cloud Functions)
-- **도메인**: eleup.kr (SSL by Let's Encrypt)
 
 ## 설정
 
