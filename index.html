@@ -208,6 +208,7 @@
         <div class="gallery-header-right">
           <span id="gallery-student-name" class="student-badge"></span>
           <button class="btn btn-small" onclick="changeStudentName()">이름 변경</button>
+          <button class="btn btn-small chat-toggle-btn" onclick="toggleChatPanel()" title="대화">💬 대화<span class="chat-unread-dot" style="display:none"></span></button>
         </div>
       </header>
       <div id="gallery-deadline" class="deadline-notice" style="display:none"></div>
@@ -669,6 +670,7 @@
           <button class="btn btn-small" onclick="showBoardQr()">📱 QR 코드</button>
           <button class="btn btn-small" onclick="copyBoardLink()">🔗 링크 복사</button>
           <button class="btn btn-small" onclick="downloadAll()">📥 전체 다운로드</button>
+          <button class="btn btn-small chat-toggle-btn" onclick="toggleChatPanel()" title="대화">💬 대화<span class="chat-unread-dot" style="display:none"></span></button>
           <button class="btn btn-small btn-danger" onclick="deleteBoard()">🗑 보드 삭제</button>
         </div>
       </div>
@@ -807,6 +809,26 @@
 
   <!-- 분류: 색상 피커 -->
   <div id="cl-color-picker" class="cl-color-picker" style="display:none"></div>
+
+  <!-- 과제 보드: 채팅 패널 -->
+  <div id="chat-panel" class="chat-panel" style="display:none">
+    <div class="chat-panel-header">
+      <div class="chat-panel-title">
+        <span>💬 대화</span>
+        <span id="chat-thread-label" class="chat-thread-label"></span>
+      </div>
+      <button class="chat-panel-close" onclick="toggleChatPanel()" title="닫기">✕</button>
+    </div>
+    <div id="chat-tabs" class="chat-tabs"></div>
+    <div id="chat-thread-hint" class="chat-thread-hint" style="display:none"></div>
+    <div id="chat-messages" class="chat-messages">
+      <div class="chat-empty">대화를 불러오는 중...</div>
+    </div>
+    <div class="chat-composer">
+      <textarea id="chat-input" class="chat-input" rows="2" placeholder="메시지를 입력하세요 (Enter로 전송, Shift+Enter 줄바꿈)" maxlength="1000"></textarea>
+      <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()">전송</button>
+    </div>
+  </div>
 
   <div id="toast" class="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>

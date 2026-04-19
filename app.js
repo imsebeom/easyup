@@ -421,6 +421,8 @@ window.showView = function(viewId) {
   if (unsubscribeClassifyGallery && viewId !== 'classify-gallery-view') { unsubscribeClassifyGallery(); unsubscribeClassifyGallery = null; }
   if (unsubscribeClassifyBoard && viewId !== 'classify-board-view') { unsubscribeClassifyBoard(); unsubscribeClassifyBoard = null; }
   if (unsubscribeBoardDoc && viewId !== 'gallery-view' && viewId !== 'inquiry-gallery-view') { unsubscribeBoardDoc(); unsubscribeBoardDoc = null; }
+  // 채팅은 과제 수합 보드(gallery-view/board-view)에서만 유효
+  if (viewId !== 'gallery-view' && viewId !== 'board-view') { cleanupChat(); }
   if (viewId === 'users-view') loadUsers();
 };
 
@@ -1022,7 +1024,11 @@ function showGallery() {
   unsubscribeGallery = onSnapshot(submissionsQuery(currentBoardCode), (snapshot) => {
     galleryDocs = snapshot.docs;
     renderGallery(snapshot.docs);
+    // 참여자 목록이 제출물 기반이므로 갱신될 때마다 탭 재렌더
+    if (currentBoard?.type === 'assignment') renderChatTabs();
   });
+
+  setupChatForBoard();
 
   // Board doc listener for real-time allowPeek sync
   if (unsubscribeBoardDoc) unsubscribeBoardDoc();
@@ -1422,6 +1428,326 @@ document.getElementById('detail-modal').addEventListener('keydown', (e) => {
       cancelCommentEdit();
     }
   }
+});
+
+// ══════════════════════════════════════
+//  BOARD CHAT (과제 보드: 전체 채팅 + 교사 귓말)
+// ══════════════════════════════════════
+let unsubscribeChat = null;
+let chatMessages = [];
+let chatActiveThread = 'public';
+let chatOpen = false;
+
+function chatLastSeenKey(thread) {
+  return `easyup_chat_seen_${currentBoardCode}_${thread}`;
+}
+
+function getChatParticipants() {
+  const map = new Map(); // deviceId -> name
+  // 제출물에서 참여자 수집
+  for (const d of galleryDocs || []) {
+    try {
+      const data = d.data();
+      if (data.deviceId && data.name) map.set(data.deviceId, data.name);
+    } catch (_) {}
+  }
+  // 채팅에서 참여자 수집 (학생만)
+  for (const m of chatMessages) {
+    if (!m.isTeacher && m.senderDeviceId && m.senderName) map.set(m.senderDeviceId, m.senderName);
+    if (m.targetDeviceId && m.targetName && !map.has(m.targetDeviceId)) map.set(m.targetDeviceId, m.targetName);
+  }
+  // 본인(학생)은 탭에서 제외
+  if (!isCurrentBoardTeacher()) map.delete(deviceId);
+  return map;
+}
+
+function chatThreadForStudent() { return `dm:${deviceId}`; }
+
+function markChatThreadSeen(thread) {
+  try {
+    const thisThreadMsgs = chatMessages.filter(m => m.thread === thread);
+    const latest = thisThreadMsgs.reduce((acc, m) => {
+      const t = m.createdAt?.toMillis ? m.createdAt.toMillis() : 0;
+      return t > acc ? t : acc;
+    }, 0);
+    if (latest > 0) localStorage.setItem(chatLastSeenKey(thread), String(latest));
+  } catch (_) {}
+}
+
+function hasUnreadInThread(thread) {
+  try {
+    const seen = parseInt(localStorage.getItem(chatLastSeenKey(thread)) || '0', 10);
+    const myDid = deviceId;
+    return chatMessages.some(m => {
+      if (m.thread !== thread) return false;
+      // 본인이 보낸 건 unread 제외
+      const teacher = isCurrentBoardTeacher();
+      const isMine = teacher ? m.isTeacher : (m.senderDeviceId === myDid);
+      if (isMine) return false;
+      const t = m.createdAt?.toMillis ? m.createdAt.toMillis() : 0;
+      return t > seen;
+    });
+  } catch { return false; }
+}
+
+function setupChatForBoard() {
+  // 과제 수합 보드만 대상
+  if (!currentBoard || currentBoard.type !== 'assignment' || !currentBoardCode) {
+    cleanupChat();
+    return;
+  }
+  document.querySelectorAll('.chat-toggle-btn').forEach(b => b.style.display = '');
+  if (unsubscribeChat) unsubscribeChat();
+  chatMessages = [];
+  chatActiveThread = 'public';
+  const q = query(collection(db, 'boards', currentBoardCode, 'messages'), orderBy('createdAt', 'asc'));
+  unsubscribeChat = onSnapshot(q, (snap) => {
+    chatMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderChatTabs();
+    renderChatMessages();
+    updateChatUnreadBadge();
+  }, (err) => {
+    console.error('chat listener error', err);
+  });
+}
+
+function cleanupChat() {
+  if (unsubscribeChat) { unsubscribeChat(); unsubscribeChat = null; }
+  chatMessages = [];
+  chatActiveThread = 'public';
+  chatOpen = false;
+  document.body.classList.remove('chat-open');
+  const panel = document.getElementById('chat-panel');
+  if (panel) { panel.classList.remove('open'); panel.style.display = 'none'; }
+  document.querySelectorAll('.chat-toggle-btn').forEach(b => b.style.display = 'none');
+  document.querySelectorAll('.chat-unread-dot').forEach(d => d.style.display = 'none');
+}
+
+window.toggleChatPanel = function() {
+  const panel = document.getElementById('chat-panel');
+  if (!panel) return;
+  chatOpen = !chatOpen;
+  if (chatOpen) {
+    panel.style.display = 'flex';
+    // 다음 프레임에 transform 적용 (애니메이션)
+    requestAnimationFrame(() => panel.classList.add('open'));
+    document.body.classList.add('chat-open');
+    markChatThreadSeen(chatActiveThread);
+    updateChatUnreadBadge();
+    setTimeout(() => {
+      const body = document.getElementById('chat-messages');
+      if (body) body.scrollTop = body.scrollHeight;
+      document.getElementById('chat-input')?.focus();
+    }, 50);
+  } else {
+    panel.classList.remove('open');
+    document.body.classList.remove('chat-open');
+    setTimeout(() => { if (!chatOpen) panel.style.display = 'none'; }, 300);
+  }
+};
+
+window.switchChatThread = function(thread) {
+  chatActiveThread = thread;
+  renderChatTabs();
+  renderChatMessages();
+  markChatThreadSeen(thread);
+  updateChatUnreadBadge();
+  setTimeout(() => {
+    const body = document.getElementById('chat-messages');
+    if (body) body.scrollTop = body.scrollHeight;
+    document.getElementById('chat-input')?.focus();
+  }, 30);
+};
+
+function renderChatTabs() {
+  const tabsEl = document.getElementById('chat-tabs');
+  const labelEl = document.getElementById('chat-thread-label');
+  const hintEl = document.getElementById('chat-thread-hint');
+  if (!tabsEl) return;
+  const teacher = isCurrentBoardTeacher();
+  const participants = getChatParticipants();
+
+  const tabs = [];
+  tabs.push({ thread: 'public', label: '🌐 전체', unread: hasUnreadInThread('public') });
+
+  if (teacher) {
+    for (const [did, name] of participants) {
+      const th = 'dm:' + did;
+      tabs.push({ thread: th, label: `🔒 ${name}`, unread: hasUnreadInThread(th) });
+    }
+  } else {
+    const myThread = chatThreadForStudent();
+    const hasDM = chatMessages.some(m => m.thread === myThread);
+    if (hasDM) tabs.push({ thread: myThread, label: '🔒 교사 1:1', unread: hasUnreadInThread(myThread) });
+  }
+
+  // 현재 탭이 사라지면 public으로 폴백
+  if (!tabs.some(t => t.thread === chatActiveThread)) chatActiveThread = 'public';
+
+  tabsEl.innerHTML = tabs.map(t => `
+    <button class="chat-tab ${t.thread === chatActiveThread ? 'active' : ''}" data-thread="${escapeHtml(t.thread)}">
+      ${escapeHtml(t.label)}${t.unread && t.thread !== chatActiveThread ? '<span class="chat-tab-dot"></span>' : ''}
+    </button>
+  `).join('');
+
+  // 교사: 공개 탭에서도 특정 학생에게 귓말 시작할 수 있도록 드롭다운 추가
+  if (teacher && participants.size > 0) {
+    const opts = ['<option value="">+ 귓말 시작…</option>']
+      .concat(Array.from(participants.entries()).map(([did, name]) =>
+        `<option value="${escapeHtml('dm:' + did)}">${escapeHtml(name)}에게 귓말</option>`))
+      .join('');
+    tabsEl.insertAdjacentHTML('beforeend',
+      `<select class="chat-tab" style="padding:6px 8px" onchange="if(this.value){switchChatThread(this.value);this.selectedIndex=0;}">${opts}</select>`);
+  }
+
+  // thread label + hint
+  if (chatActiveThread === 'public') {
+    labelEl.textContent = '모두에게 보임';
+    hintEl.style.display = 'none';
+  } else {
+    const did = chatActiveThread.slice(3);
+    const name = participants.get(did) || (did === deviceId ? '나' : '');
+    if (teacher) {
+      labelEl.textContent = `🔒 ${name}님과 1:1`;
+      hintEl.textContent = '이 메시지는 해당 학생에게만 보입니다.';
+    } else {
+      labelEl.textContent = '🔒 교사와 1:1';
+      hintEl.textContent = '이 메시지는 교사에게만 보입니다.';
+    }
+    hintEl.style.display = '';
+  }
+}
+
+function renderChatMessages() {
+  const body = document.getElementById('chat-messages');
+  if (!body) return;
+  const teacher = isCurrentBoardTeacher();
+  const myDid = deviceId;
+  let list;
+  if (chatActiveThread === 'public') {
+    list = chatMessages.filter(m => m.thread === 'public');
+  } else {
+    const targetDid = chatActiveThread.slice(3);
+    if (!teacher && targetDid !== myDid) list = [];
+    else list = chatMessages.filter(m => m.thread === chatActiveThread);
+  }
+
+  if (list.length === 0) {
+    body.innerHTML = '<div class="chat-empty">아직 메시지가 없습니다.<br>첫 메시지를 남겨보세요!</div>';
+    return;
+  }
+
+  body.innerHTML = list.map(m => {
+    const isMine = teacher ? m.isTeacher : (m.senderDeviceId === myDid);
+    const time = m.createdAt?.toDate ? formatDateShort(m.createdAt.toDate()) : '';
+    const klass = [
+      'chat-msg',
+      isMine ? 'chat-msg-mine' : '',
+      m.isTeacher && !isMine ? 'chat-msg-teacher' : '',
+      m.thread !== 'public' ? 'chat-msg-dm' : '',
+    ].filter(Boolean).join(' ');
+    const teacherBadge = m.isTeacher ? ' 👨‍🏫' : '';
+    // 삭제는 교사(보드 소유자)만 가능 (Firestore rules 기준)
+    const actions = teacher ? `<div class="chat-msg-actions">
+      <button class="chat-msg-act-btn" data-msg-id="${escapeHtml(m.id)}" data-action="delete" title="삭제">🗑</button>
+    </div>` : '';
+    return `<div class="${klass}" data-msg-id="${escapeHtml(m.id)}">
+      <div class="chat-msg-meta">
+        <span class="chat-msg-name">${escapeHtml(m.senderName || '')}${teacherBadge}</span>
+        <span class="chat-msg-time">${time}</span>
+      </div>
+      <div class="chat-msg-text">${escapeHtml(m.text || '')}</div>
+      ${actions}
+    </div>`;
+  }).join('');
+  body.scrollTop = body.scrollHeight;
+}
+
+window.sendChatMessage = async function() {
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+  const text = (input.value || '').trim();
+  if (!text) return;
+  if (text.length > 1000) { toast('1000자 이내로 입력하세요'); return; }
+
+  const teacher = isCurrentBoardTeacher();
+  let thread = chatActiveThread;
+  let targetDeviceId = null;
+  let targetName = null;
+  if (thread !== 'public') {
+    targetDeviceId = thread.slice(3);
+    const participants = getChatParticipants();
+    targetName = participants.get(targetDeviceId) || null;
+    // 학생은 본인 DM 스레드(dm:myDeviceId)에서만 전송 가능
+    if (!teacher && targetDeviceId !== deviceId) { toast('권한이 없습니다'); return; }
+  }
+
+  if (!teacher && !studentName) { toast('먼저 이름을 설정하세요'); return; }
+
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    await setDoc(doc(db, 'boards', currentBoardCode, 'messages', id), {
+      text,
+      senderName: teacher ? (currentUser?.displayName || currentUser?.email || '교사') : studentName,
+      senderDeviceId: deviceId,
+      senderUid: teacher ? (currentUser?.uid || null) : null,
+      isTeacher: !!teacher,
+      thread,
+      targetDeviceId,
+      targetName,
+      createdAt: serverTimestamp()
+    });
+    input.value = '';
+    markChatThreadSeen(thread);
+  } catch (e) {
+    console.error(e);
+    toast('메시지 전송 실패');
+  }
+};
+
+async function deleteChatMessage(msgId) {
+  if (!msgId) return;
+  if (!confirm('이 메시지를 삭제하시겠습니까?')) return;
+  try {
+    await deleteDoc(doc(db, 'boards', currentBoardCode, 'messages', msgId));
+  } catch (e) {
+    console.error(e);
+    toast('메시지 삭제 실패');
+  }
+}
+
+function updateChatUnreadBadge() {
+  const teacher = isCurrentBoardTeacher();
+  const myDid = deviceId;
+  let unread = false;
+  // public
+  if (hasUnreadInThread('public')) unread = true;
+  // DM
+  if (teacher) {
+    const participants = getChatParticipants();
+    for (const did of participants.keys()) {
+      if (hasUnreadInThread('dm:' + did)) { unread = true; break; }
+    }
+  } else {
+    if (hasUnreadInThread('dm:' + myDid)) unread = true;
+  }
+  document.querySelectorAll('.chat-unread-dot').forEach(d => d.style.display = unread ? '' : 'none');
+}
+
+// Event delegation for chat panel (ES module defers past DOM parse, so elements exist)
+document.getElementById('chat-tabs')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.chat-tab');
+  if (btn && btn.dataset.thread) window.switchChatThread(btn.dataset.thread);
+});
+document.getElementById('chat-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    window.sendChatMessage();
+  }
+});
+document.getElementById('chat-messages')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.chat-msg-act-btn');
+  if (btn?.dataset.action === 'delete') deleteChatMessage(btn.dataset.msgId);
 });
 
 // ══════════════════════════════════════
@@ -2731,7 +3057,13 @@ async function openBoard(code) {
     loadBoardPlacements(code);
 
     if (unsubscribe) unsubscribe();
-    unsubscribe = onSnapshot(submissionsQuery(code), (snap) => { galleryDocs = snap.docs; renderSubmissions(snap.docs); });
+    unsubscribe = onSnapshot(submissionsQuery(code), (snap) => {
+      galleryDocs = snap.docs;
+      renderSubmissions(snap.docs);
+      if (currentBoard?.type === 'assignment') renderChatTabs();
+    });
+
+    setupChatForBoard();
   } catch (e) { toast('오류 발생'); }
 }
 

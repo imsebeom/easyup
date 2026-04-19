@@ -64,6 +64,22 @@ service cloud.firestore {
           allow update, delete: if isBoardOpen(boardCode) || isOwner(boardCode);
         }
       }
+
+      // 보드 채팅 메시지 (과제 보드 전체 채팅 + 교사 귓말)
+      // 비공개(private) 보드는 교사만, 그 외에는 누구나 read/create 가능
+      // DM 스레드 접근 제한은 클라이언트 필터링에 의존 (기존 deviceId 신뢰 모델과 동일)
+      match /messages/{messageId} {
+        allow read: if get(/databases/$(database)/documents/boards/$(boardCode)).data.status != 'private'
+          || isOwner(boardCode);
+        // Create: active 보드에서는 누구나, closed여도 교사는 가능. 본문 길이 제한.
+        allow create: if (isBoardOpen(boardCode) || isOwner(boardCode))
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.thread is string;
+        // Update/Delete: 교사(보드 소유자)만. 학생은 본인 메시지라도 서버 규칙에서 검증 불가.
+        allow update, delete: if isOwner(boardCode);
+      }
     }
   }
 }
