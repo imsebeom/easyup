@@ -470,7 +470,6 @@
       </div>
       <div id="class-grid" class="class-grid"></div>
       <div id="class-table" class="class-table-wrap" style="display:none"></div>
-      <div class="class-chat-spacer"></div>
     </div>
 
     <!-- 학생: 클래스 공개 뷰 -->
@@ -491,7 +490,6 @@
         <button class="btn btn-small btn-secondary" onclick="classStudentWeekToday()">오늘</button>
       </div>
       <div id="class-student-grid" class="class-grid"></div>
-      <div class="class-chat-spacer"></div>
     </div>
 
     <!-- 클래스 생성 모달 -->
@@ -835,7 +833,10 @@
     <div id="class-chat-messages" class="chat-messages">
       <div class="chat-empty">대화를 불러오는 중...</div>
     </div>
+    <div id="class-chat-attach-preview" class="chat-attach-preview" style="display:none"></div>
     <div class="chat-composer">
+      <button id="class-chat-attach-btn" class="chat-attach-btn" style="display:none" onclick="document.getElementById('class-chat-file-input').click()" title="파일 첨부 (최대 100MB)">📎</button>
+      <input id="class-chat-file-input" type="file" style="display:none">
       <textarea id="class-chat-input" class="chat-input" rows="2" placeholder="메시지를 입력하세요 (Enter 전송)" maxlength="1000"></textarea>
       <button id="class-chat-send-btn" class="chat-send-btn" onclick="sendClassChatMessage()">전송</button>
     </div>
@@ -858,7 +859,10 @@
     <div id="chat-messages" class="chat-messages">
       <div class="chat-empty">대화를 불러오는 중...</div>
     </div>
+    <div id="chat-attach-preview" class="chat-attach-preview" style="display:none"></div>
     <div class="chat-composer">
+      <button id="chat-attach-btn" class="chat-attach-btn" style="display:none" onclick="document.getElementById('chat-file-input').click()" title="파일 첨부 (최대 100MB)">📎</button>
+      <input id="chat-file-input" type="file" style="display:none">
       <textarea id="chat-input" class="chat-input" rows="2" placeholder="메시지를 입력하세요 (Enter로 전송, Shift+Enter 줄바꿈)" maxlength="1000"></textarea>
       <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()">전송</button>
     </div>

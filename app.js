@@ -146,9 +146,43 @@ let assignmentSortOrders = {};
 // Cached DateTimeFormat instances
 const dtfFull  = new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const dtfShort = new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric' });
+const dtfTimeOnly = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+const dtfDateTime = new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 
 function formatDate(d)      { return dtfFull.format(d); }
 function formatDateShort(d)  { return dtfShort.format(d); }
+
+// 채팅용 시간 포맷: 오늘이면 HH:mm, 아니면 M/D HH:mm
+function formatChatTime(d) {
+  if (!d) return '';
+  const now = new Date();
+  const same = d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
+  return same ? dtfTimeOnly.format(d) : dtfDateTime.format(d);
+}
+
+// 텍스트 내 URL을 <a target="_blank">로 변환 (escape는 내부에서 처리)
+// http(s)://, www. 로 시작하는 URL 감지
+const URL_REGEX = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+function linkifyText(text) {
+  if (!text) return '';
+  // 1) 전체 escape
+  const safe = escapeHtml(text);
+  // 2) escape된 문자열 위에서 URL 매칭 (escape된 상태에서도 URL 문자는 그대로 유지)
+  return safe.replace(URL_REGEX, (match) => {
+    // 뒤에 붙은 구두점(., ,, ), !, ?) 제거
+    let url = match;
+    let trailing = '';
+    const trailMatch = url.match(/[.,!?)\]}'"]+$/);
+    if (trailMatch) {
+      trailing = trailMatch[0];
+      url = url.slice(0, -trailing.length);
+    }
+    const href = url.startsWith('http') ? url : 'https://' + url;
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="chat-link">${url}</a>${trailing}`;
+  });
+}
 
 function formatSize(b) {
   if (b < 1024) return b + 'B';
@@ -1555,6 +1589,11 @@ function setupChatForBoard() {
 
   // 학생 접속 presence 등록
   if (!isCurrentBoardTeacher()) registerStudentPresence();
+
+  // 교사일 때만 첨부 버튼 노출 + 드래그/붙여넣기 활성화
+  const attachBtn = document.getElementById('chat-attach-btn');
+  if (attachBtn) attachBtn.style.display = isCurrentBoardTeacher() ? '' : 'none';
+  clearPendingChatAttachment();
 }
 
 function cleanupChat() {
@@ -1750,7 +1789,7 @@ function renderChatMessages() {
 
   body.innerHTML = list.map(m => {
     const isMine = teacher ? m.isTeacher : (m.senderDeviceId === myDid);
-    const time = m.createdAt?.toDate ? formatDateShort(m.createdAt.toDate()) : '';
+    const time = m.createdAt?.toDate ? formatChatTime(m.createdAt.toDate()) : '';
     const klass = [
       'chat-msg',
       isMine ? 'chat-msg-mine' : '',
@@ -1762,23 +1801,99 @@ function renderChatMessages() {
     const actions = teacher ? `<div class="chat-msg-actions">
       <button class="chat-msg-act-btn" data-msg-id="${escapeHtml(m.id)}" data-action="delete" title="삭제">🗑</button>
     </div>` : '';
+    const textHtml = m.text ? `<div class="chat-msg-text">${linkifyText(m.text)}</div>` : '';
+    const mediaHtml = renderChatFilesHtml(m.files || []);
     return `<div class="${klass}" data-msg-id="${escapeHtml(m.id)}">
       <div class="chat-msg-meta">
         <span class="chat-msg-name">${escapeHtml(m.senderName || '')}${teacherBadge}</span>
-        <span class="chat-msg-time">${time}</span>
+        <span class="chat-msg-time">${escapeHtml(time)}</span>
       </div>
-      <div class="chat-msg-text">${escapeHtml(m.text || '')}</div>
+      ${textHtml}
+      ${mediaHtml}
       ${actions}
     </div>`;
   }).join('');
   body.scrollTop = body.scrollHeight;
 }
 
+// 채팅 메시지 내 첨부파일 HTML 렌더
+function renderChatFilesHtml(files) {
+  if (!files || !files.length) return '';
+  return `<div class="chat-msg-media">` + files.map(f => {
+    const safeName = escapeHtml(f.name || '파일');
+    const safeUrl = escapeHtml(f.url || '#');
+    const size = f.size ? ` <span class="chat-msg-file-size">${escapeHtml(formatSize(f.size))}</span>` : '';
+    const t = getMediaType(f.name || '');
+    if (t === 'image') {
+      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer"><img src="${safeUrl}" alt="${safeName}" loading="lazy"></a>`;
+    }
+    if (t === 'video') {
+      return `<video src="${safeUrl}" controls preload="metadata"></video>`;
+    }
+    return `<a class="chat-msg-file" href="${safeUrl}" target="_blank" rel="noopener noreferrer" download="${safeName}">
+      <span class="chat-msg-file-icon">📎</span>
+      <span>${safeName}</span>${size}
+    </a>`;
+  }).join('') + `</div>`;
+}
+
+// 채팅 첨부: 보드 스코프 (교사 전용, 최대 100MB)
+const CHAT_MAX_FILE_BYTES = 100 * 1024 * 1024;
+let pendingChatAttachment = null; // { file, previewUrl }
+
+function setPendingChatAttachment(file) {
+  if (!file) return;
+  if (file.size > CHAT_MAX_FILE_BYTES) { toast('100MB 이하 파일만 전송할 수 있습니다'); return; }
+  if (pendingChatAttachment?.previewUrl) URL.revokeObjectURL(pendingChatAttachment.previewUrl);
+  const previewUrl = URL.createObjectURL(file);
+  pendingChatAttachment = { file, previewUrl };
+  renderChatAttachmentPreview();
+}
+
+function clearPendingChatAttachment() {
+  if (pendingChatAttachment?.previewUrl) URL.revokeObjectURL(pendingChatAttachment.previewUrl);
+  pendingChatAttachment = null;
+  const fileInput = document.getElementById('chat-file-input');
+  if (fileInput) fileInput.value = '';
+  renderChatAttachmentPreview();
+}
+
+function renderChatAttachmentPreview() {
+  const box = document.getElementById('chat-attach-preview');
+  if (!box) return;
+  if (!pendingChatAttachment) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const { file, previewUrl } = pendingChatAttachment;
+  const t = getMediaType(file.name);
+  const mediaHtml = t === 'image'
+    ? `<img src="${previewUrl}" alt="">`
+    : t === 'video'
+      ? `<video src="${previewUrl}" muted></video>`
+      : `<span style="font-size:1.5rem">📎</span>`;
+  box.innerHTML = `${mediaHtml}
+    <div class="chat-attach-info">
+      <div class="chat-attach-name">${escapeHtml(file.name)}</div>
+      <div class="chat-attach-size">${escapeHtml(formatSize(file.size))}</div>
+    </div>
+    <button class="chat-attach-cancel" onclick="clearChatAttachment()" title="취소">✕</button>`;
+  box.style.display = '';
+}
+window.clearChatAttachment = clearPendingChatAttachment;
+
+async function uploadChatFile(file, scopePath) {
+  const safeName = file.name.replace(/[^\w.\-가-힣]/g, '_');
+  const path = `${scopePath}/${Date.now()}_${safeName}`;
+  const r = ref(storage, path);
+  await uploadBytesResumable(r, file);
+  const url = await getDownloadURL(r);
+  return { url, name: file.name, size: file.size, type: file.type || '', path };
+}
+
 window.sendChatMessage = async function() {
   const input = document.getElementById('chat-input');
   if (!input) return;
   const text = (input.value || '').trim();
-  if (!text) return;
+  const hasFile = !!pendingChatAttachment;
+  if (!text && !hasFile) return;
   if (text.length > 1000) { toast('1000자 이내로 입력하세요'); return; }
 
   const teacher = isCurrentBoardTeacher();
@@ -1799,12 +1914,22 @@ window.sendChatMessage = async function() {
     return;
   }
 
+  if (hasFile && !teacher) { toast('파일 첨부는 교사만 가능합니다'); return; }
   if (!teacher && !studentName) { toast('먼저 이름을 설정하세요'); return; }
 
-  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const sendBtn = document.getElementById('chat-send-btn');
+  if (sendBtn) sendBtn.disabled = true;
+
+  let files = [];
   try {
-    await setDoc(doc(db, 'boards', currentBoardCode, 'messages', id), {
-      text,
+    if (hasFile) {
+      toast('파일 업로드 중...');
+      const uploaded = await uploadChatFile(pendingChatAttachment.file, `boards/${currentBoardCode}/chat`);
+      files = [uploaded];
+    }
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const payload = {
+      text: text || '',
       senderName: teacher ? (currentUser?.displayName || currentUser?.email || '교사') : studentName,
       senderDeviceId: deviceId,
       senderUid: teacher ? (currentUser?.uid || null) : null,
@@ -1812,13 +1937,18 @@ window.sendChatMessage = async function() {
       thread,
       targetDeviceId,
       targetName,
-      createdAt: serverTimestamp()
-    });
+      createdAt: serverTimestamp(),
+    };
+    if (files.length) payload.files = files;
+    await setDoc(doc(db, 'boards', currentBoardCode, 'messages', id), payload);
     input.value = '';
+    clearPendingChatAttachment();
     markChatThreadSeen(thread);
   } catch (e) {
     console.error(e);
     toast('메시지 전송 실패');
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
   }
 };
 
@@ -1897,6 +2027,51 @@ document.getElementById('chat-input')?.addEventListener('keydown', (e) => {
 document.getElementById('chat-messages')?.addEventListener('click', (e) => {
   const btn = e.target.closest('.chat-msg-act-btn');
   if (btn?.dataset.action === 'delete') deleteChatMessage(btn.dataset.msgId);
+});
+
+// 파일 입력 핸들러 (board chat — 교사 전용)
+document.getElementById('chat-file-input')?.addEventListener('change', (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  if (!isCurrentBoardTeacher()) { toast('파일 첨부는 교사만 가능합니다'); e.target.value = ''; return; }
+  setPendingChatAttachment(f);
+});
+
+// 드래그 & 드롭 (board chat — 교사만)
+(function() {
+  const body = document.getElementById('chat-messages');
+  if (!body) return;
+  let counter = 0;
+  body.addEventListener('dragenter', (e) => {
+    if (!isCurrentBoardTeacher()) return;
+    e.preventDefault(); counter++;
+    body.classList.add('drop-active');
+  });
+  body.addEventListener('dragover', (e) => {
+    if (!isCurrentBoardTeacher()) return;
+    e.preventDefault();
+  });
+  body.addEventListener('dragleave', () => {
+    counter--; if (counter <= 0) { counter = 0; body.classList.remove('drop-active'); }
+  });
+  body.addEventListener('drop', (e) => {
+    if (!isCurrentBoardTeacher()) return;
+    e.preventDefault(); counter = 0; body.classList.remove('drop-active');
+    const f = e.dataTransfer?.files?.[0];
+    if (f) setPendingChatAttachment(f);
+  });
+})();
+
+// 붙여넣기 (board chat — 교사만, 입력창 포커스 상태에서)
+document.getElementById('chat-input')?.addEventListener('paste', (e) => {
+  if (!isCurrentBoardTeacher()) return;
+  const items = e.clipboardData?.items || [];
+  for (const item of items) {
+    if (item.kind === 'file') {
+      const f = item.getAsFile();
+      if (f) { e.preventDefault(); setPendingChatAttachment(f); break; }
+    }
+  }
 });
 
 // ══════════════════════════════════════
@@ -2856,6 +3031,11 @@ function setupClassChat(alias, isTeacher) {
   // 학생 이름 게이트 처리 및 presence 등록
   refreshClassChatNameGate();
   if (!isTeacher && getClassChatName()) registerClassStudentPresence();
+
+  // 교사일 때만 첨부 버튼 노출
+  const attachBtn = document.getElementById('class-chat-attach-btn');
+  if (attachBtn) attachBtn.style.display = isTeacher ? '' : 'none';
+  clearPendingClassChatAttachment();
 }
 
 function cleanupClassChat() {
@@ -3046,7 +3226,7 @@ function renderClassChatMessages() {
   }
   body.innerHTML = list.map(m => {
     const isMine = teacher ? m.isTeacher : (m.senderDeviceId === deviceId);
-    const time = m.createdAt?.toDate ? formatDateShort(m.createdAt.toDate()) : '';
+    const time = m.createdAt?.toDate ? formatChatTime(m.createdAt.toDate()) : '';
     const klass = [
       'chat-msg',
       isMine ? 'chat-msg-mine' : '',
@@ -3057,12 +3237,15 @@ function renderClassChatMessages() {
     const actions = teacher ? `<div class="chat-msg-actions">
       <button class="chat-msg-act-btn" data-msg-id="${escapeHtml(m.id)}" data-action="delete" title="삭제">🗑</button>
     </div>` : '';
+    const textHtml = m.text ? `<div class="chat-msg-text">${linkifyText(m.text)}</div>` : '';
+    const mediaHtml = renderChatFilesHtml(m.files || []);
     return `<div class="${klass}" data-msg-id="${escapeHtml(m.id)}">
       <div class="chat-msg-meta">
         <span class="chat-msg-name">${escapeHtml(m.senderName || '')}${teacherBadge}</span>
-        <span class="chat-msg-time">${time}</span>
+        <span class="chat-msg-time">${escapeHtml(time)}</span>
       </div>
-      <div class="chat-msg-text">${escapeHtml(m.text || '')}</div>
+      ${textHtml}
+      ${mediaHtml}
       ${actions}
     </div>`;
   }).join('');
@@ -3081,17 +3264,59 @@ window.switchClassChatThread = function(thread) {
   }, 30);
 };
 
+// 클래스 채팅 첨부 상태
+let pendingClassChatAttachment = null;
+
+function setPendingClassChatAttachment(file) {
+  if (!file) return;
+  if (file.size > CHAT_MAX_FILE_BYTES) { toast('100MB 이하 파일만 전송할 수 있습니다'); return; }
+  if (pendingClassChatAttachment?.previewUrl) URL.revokeObjectURL(pendingClassChatAttachment.previewUrl);
+  pendingClassChatAttachment = { file, previewUrl: URL.createObjectURL(file) };
+  renderClassChatAttachmentPreview();
+}
+
+function clearPendingClassChatAttachment() {
+  if (pendingClassChatAttachment?.previewUrl) URL.revokeObjectURL(pendingClassChatAttachment.previewUrl);
+  pendingClassChatAttachment = null;
+  const fi = document.getElementById('class-chat-file-input');
+  if (fi) fi.value = '';
+  renderClassChatAttachmentPreview();
+}
+window.clearClassChatAttachment = clearPendingClassChatAttachment;
+
+function renderClassChatAttachmentPreview() {
+  const box = document.getElementById('class-chat-attach-preview');
+  if (!box) return;
+  if (!pendingClassChatAttachment) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const { file, previewUrl } = pendingClassChatAttachment;
+  const t = getMediaType(file.name);
+  const mediaHtml = t === 'image'
+    ? `<img src="${previewUrl}" alt="">`
+    : t === 'video'
+      ? `<video src="${previewUrl}" muted></video>`
+      : `<span style="font-size:1.5rem">📎</span>`;
+  box.innerHTML = `${mediaHtml}
+    <div class="chat-attach-info">
+      <div class="chat-attach-name">${escapeHtml(file.name)}</div>
+      <div class="chat-attach-size">${escapeHtml(formatSize(file.size))}</div>
+    </div>
+    <button class="chat-attach-cancel" onclick="clearClassChatAttachment()" title="취소">✕</button>`;
+  box.style.display = '';
+}
+
 window.sendClassChatMessage = async function() {
   const input = document.getElementById('class-chat-input');
   if (!input) return;
   const text = (input.value || '').trim();
-  if (!text) return;
+  const hasFile = !!pendingClassChatAttachment;
+  if (!text && !hasFile) return;
   if (text.length > 1000) { toast('1000자 이내로 입력하세요'); return; }
   if (!classChatContext) return;
 
   const teacher = isClassChatTeacher();
   const senderName = getClassChatName();
   if (!teacher && !senderName) { toast('먼저 이름을 입력하세요'); return; }
+  if (hasFile && !teacher) { toast('파일 첨부는 교사만 가능합니다'); return; }
 
   let thread = classChatActiveThread;
   let targetDeviceId = null;
@@ -3107,10 +3332,19 @@ window.sendClassChatMessage = async function() {
     return;
   }
 
-  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const sendBtn = document.getElementById('class-chat-send-btn');
+  if (sendBtn) sendBtn.disabled = true;
+
+  let files = [];
   try {
-    await setDoc(doc(db, 'classes', classChatContext.alias, 'messages', id), {
-      text,
+    if (hasFile) {
+      toast('파일 업로드 중...');
+      const uploaded = await uploadChatFile(pendingClassChatAttachment.file, `classes/${classChatContext.alias}/chat`);
+      files = [uploaded];
+    }
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const payload = {
+      text: text || '',
       senderName,
       senderDeviceId: deviceId,
       senderUid: teacher ? (currentUser?.uid || null) : null,
@@ -3119,10 +3353,14 @@ window.sendClassChatMessage = async function() {
       targetDeviceId,
       targetName,
       createdAt: serverTimestamp(),
-    });
+    };
+    if (files.length) payload.files = files;
+    await setDoc(doc(db, 'classes', classChatContext.alias, 'messages', id), payload);
     input.value = '';
+    clearPendingClassChatAttachment();
     markClassChatSeen(thread);
   } catch (e) { console.error(e); toast('메시지 전송 실패'); }
+  finally { if (sendBtn) sendBtn.disabled = false; }
 };
 
 async function deleteClassChatMessage(msgId) {
@@ -3147,6 +3385,49 @@ document.getElementById('class-chat-name-input')?.addEventListener('keydown', (e
 document.getElementById('class-chat-messages')?.addEventListener('click', (e) => {
   const btn = e.target.closest('.chat-msg-act-btn');
   if (btn?.dataset.action === 'delete') deleteClassChatMessage(btn.dataset.msgId);
+});
+
+// 클래스 채팅: 파일 입력 (교사 전용)
+document.getElementById('class-chat-file-input')?.addEventListener('change', (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  if (!isClassChatTeacher()) { toast('파일 첨부는 교사만 가능합니다'); e.target.value = ''; return; }
+  setPendingClassChatAttachment(f);
+});
+
+// 클래스 채팅: 드래그&드롭 (교사만)
+(function() {
+  const body = document.getElementById('class-chat-messages');
+  if (!body) return;
+  let counter = 0;
+  body.addEventListener('dragenter', (e) => {
+    if (!isClassChatTeacher()) return;
+    e.preventDefault(); counter++; body.classList.add('drop-active');
+  });
+  body.addEventListener('dragover', (e) => {
+    if (!isClassChatTeacher()) return; e.preventDefault();
+  });
+  body.addEventListener('dragleave', () => {
+    counter--; if (counter <= 0) { counter = 0; body.classList.remove('drop-active'); }
+  });
+  body.addEventListener('drop', (e) => {
+    if (!isClassChatTeacher()) return;
+    e.preventDefault(); counter = 0; body.classList.remove('drop-active');
+    const f = e.dataTransfer?.files?.[0];
+    if (f) setPendingClassChatAttachment(f);
+  });
+})();
+
+// 클래스 채팅: 붙여넣기 (교사만)
+document.getElementById('class-chat-input')?.addEventListener('paste', (e) => {
+  if (!isClassChatTeacher()) return;
+  const items = e.clipboardData?.items || [];
+  for (const item of items) {
+    if (item.kind === 'file') {
+      const f = item.getAsFile();
+      if (f) { e.preventDefault(); setPendingClassChatAttachment(f); break; }
+    }
+  }
 });
 
 // ══════════════════════════════════════

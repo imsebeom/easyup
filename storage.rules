@@ -1,10 +1,25 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // 보드 채팅: 교사(인증) + 100MB 제한
+    match /boards/{boardCode}/chat/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.resource.size < 100 * 1024 * 1024; // 100MB
+      allow delete: if request.auth != null;
+    }
+    // 보드 일반(제출 파일 등): 기존 1GB 유지
     match /boards/{boardCode}/{allPaths=**} {
       allow read: if true;
-      allow write: if request.resource.size < 1024 * 1024 * 1024; // 1GB limit
+      allow write: if request.resource.size < 1024 * 1024 * 1024; // 1GB
       allow delete: if true;
+    }
+    // 클래스 채팅: 교사(인증) + 100MB 제한
+    match /classes/{alias}/chat/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.resource.size < 100 * 1024 * 1024; // 100MB
+      allow delete: if request.auth != null;
     }
   }
 }

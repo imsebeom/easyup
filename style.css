@@ -686,7 +686,8 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 /* When inquiry views are active, expand #app to full width */
 #app:has(#inquiry-gallery-view.active), #app:has(#inquiry-board-view.active),
 #app:has(#gallery-view.active), #app:has(#board-view.active),
-#app:has(#classify-gallery-view.active), #app:has(#classify-board-view.active) { max-width:none; }
+#app:has(#classify-gallery-view.active), #app:has(#classify-board-view.active),
+#app:has(#class-view.active), #app:has(#class-student-view.active) { max-width:none; }
 .shelf-container { display:flex; gap:10px; padding-bottom:16px; min-height:300px; }
 .shelf-column { flex:1; min-width:0; display:flex; flex-direction:column; }
 .shelf-header { padding:10px 14px; border-radius:8px 8px 0 0; font-weight:700; font-size:.9rem; display:flex; justify-content:space-between; align-items:center; }
@@ -1404,6 +1405,66 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 }
 .chat-send-btn:hover { background:var(--primary-dark); }
 .chat-send-btn:disabled { background:var(--gray-300); cursor:not-allowed; }
+
+/* 첨부 버튼/미리보기 */
+.chat-attach-btn {
+  flex:0 0 auto; padding:0 10px;
+  background:var(--gray-100); border:1px solid var(--border); border-radius:10px;
+  font-size:1rem; cursor:pointer; color:var(--text-light);
+  transition:all .15s;
+}
+.chat-attach-btn:hover { background:var(--primary-light); color:var(--primary); border-color:var(--primary); }
+
+.chat-attach-preview {
+  padding:8px 12px; border-top:1px solid var(--border);
+  background:var(--gray-50);
+  display:flex; align-items:center; gap:10px;
+  font-size:.82rem;
+}
+.chat-attach-preview img, .chat-attach-preview video {
+  max-width:80px; max-height:60px; border-radius:6px; object-fit:cover;
+}
+.chat-attach-preview .chat-attach-info { flex:1; min-width:0; }
+.chat-attach-preview .chat-attach-name { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.chat-attach-preview .chat-attach-size { color:var(--text-light); font-size:.75rem; }
+.chat-attach-preview .chat-attach-cancel {
+  background:none; border:none; cursor:pointer; color:var(--text-light); font-size:1rem;
+  padding:4px 8px; border-radius:6px;
+}
+.chat-attach-preview .chat-attach-cancel:hover { background:rgba(0,0,0,.05); color:var(--danger); }
+
+/* 메시지 안 미디어/첨부 */
+.chat-msg-media { margin-top:6px; }
+.chat-msg-media img, .chat-msg-media video {
+  max-width:100%; max-height:240px; border-radius:8px; cursor:pointer;
+  display:block;
+}
+.chat-msg-file {
+  display:inline-flex; align-items:center; gap:8px;
+  padding:8px 10px; margin-top:6px;
+  background:rgba(255,255,255,.7); border:1px solid var(--border);
+  border-radius:8px;
+  text-decoration:none; color:var(--text);
+  font-size:.82rem;
+}
+.chat-msg-mine .chat-msg-file { background:rgba(255,255,255,.6); }
+.chat-msg-file:hover { border-color:var(--primary); }
+.chat-msg-file .chat-msg-file-icon { font-size:1.1rem; }
+.chat-msg-file .chat-msg-file-size { color:var(--text-light); font-size:.72rem; }
+
+.chat-link { color:var(--primary); text-decoration:underline; word-break:break-all; }
+.chat-msg-mine .chat-link { color:var(--primary-dark); }
+
+/* 드롭존 */
+.chat-messages.drop-active {
+  outline:2px dashed var(--primary); outline-offset:-4px;
+  background:var(--primary-light);
+}
+.chat-upload-progress {
+  padding:6px 12px; background:var(--primary-light);
+  border-top:1px solid var(--border);
+  font-size:.78rem; color:var(--primary); font-weight:600;
+}
 
 /* 데스크톱: 채팅 열릴 때 컨텐츠 우측 여백 (과제 보드 뷰만) */
 @media (min-width: 1100px) {
