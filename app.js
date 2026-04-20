@@ -2417,7 +2417,7 @@ async function showClassTeacher(alias) {
 
     document.getElementById('class-title-display').textContent = data.title;
     setTextVisibility('class-desc-display', data.description);
-    document.getElementById('class-alias-badge').textContent = `/${alias}`;
+    document.getElementById('class-alias-badge').textContent = getClassStudentLink(alias);
     showView('class-view');
     location.hash = `class/${alias}`;
 

@@ -365,4 +365,8 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - 교사 🔓/🔒 토글로 전체 채팅 on/off (`chatPublicEnabled`)
   - 교사 귓말(DM) + `+ 귓말 시작…` 드롭다운 (접속만 한 학생 포함)
   - Firestore rules: `classes/{alias}` `members` 필드만 비인증 update 허용, `messages` read 공개, create 1000자·chatPublicEnabled 검사, update/delete는 ownerUid만
+- [x] 클래스 상단에 전체 학생 접속 URL 크게 표시 (2026-04-20)
+  - 작은 `/alias` 배지(`board-code-badge`) → `https://eleup.kr/alias` 전체 URL 대형 디스플레이로 교체
+  - `.class-url-display`: 1.5rem monospace + 점선 보더 + 프라이머리 색, hover 시 채워짐, 모바일 1.1rem
+  - 클릭 시 `copyClassStudentLink()`로 클립보드 복사 → 중복되던 "🔗 학생 링크" 버튼 제거
 - [ ] 모바일 반응형 테스트
