@@ -573,6 +573,7 @@ body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',
 .board-card:hover { box-shadow:var(--shadow-lg); }
 .board-card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:8px; }
 .board-card-header h3 { font-size:1.1rem; flex:1; }
+.board-card-class-suffix { font-size:.85rem; font-weight:500; color:var(--primary); margin-left:4px; }
 .board-card-meta { display:flex; align-items:center; gap:16px; font-size:.85rem; color:var(--gray-500); }
 .access-code-display { font-family:monospace; font-size:1.1rem; font-weight:700; background:var(--gray-100); padding:4px 10px; border-radius:6px; letter-spacing:.1em; }
 .board-card-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }

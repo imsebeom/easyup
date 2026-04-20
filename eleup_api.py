@@ -196,6 +196,32 @@ def create_board(title, description="", deadline=None,
     return code, get_join_link(code)
 
 
+def create_classify_board(title, description="", group_mode="individual",
+                          owner_uid=OWNER_UID, owner_name=OWNER_NAME):
+    """
+    분류하기(classify) 보드 생성. group_mode: "individual" or "team".
+
+    Returns: (code, join_link)
+    """
+    code = _generate_code()
+    fields = {
+        "title": title,
+        "description": description,
+        "deadline": None,
+        "type": "classify",
+        "settings": {"groupMode": group_mode},
+        "members": {},
+        "code": code,
+        "ownerUid": owner_uid,
+        "ownerName": owner_name,
+        "status": "active",
+        "hidden": False,
+        "createdAt": datetime.now(timezone.utc),
+    }
+    _create_document("boards", code, fields)
+    return code, get_join_link(code)
+
+
 def create_inquiry_board(title, description="", deadline=None,
                          categories=None,
                          owner_uid=OWNER_UID, owner_name=OWNER_NAME):

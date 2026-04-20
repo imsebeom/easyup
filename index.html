@@ -710,6 +710,18 @@
             <label class="checkbox-label"><input type="checkbox" id="edit-allow-file"> 📎 파일 업로드</label>
           </div>
         </div>
+        <div id="edit-classify-options" class="form-group" style="display:none">
+          <label>참여 모드</label>
+          <div class="radio-group">
+            <label class="radio-label"><input type="radio" name="edit-classify-mode" value="individual"> 👤 개인별</label>
+            <label class="radio-label"><input type="radio" name="edit-classify-mode" value="team"> 👥 모둠형</label>
+          </div>
+          <div id="edit-classify-team-options" style="display:none; margin-top:10px;">
+            <label>모둠 수</label>
+            <input type="number" id="edit-classify-group-count" value="6" min="2" max="20" style="width:80px; padding:8px; border:1px solid var(--border); border-radius:8px;">
+          </div>
+          <p class="form-hint">모드 전환 또는 모둠 수 축소 시 기존 참여자 배정이 사라질 수 있습니다.</p>
+        </div>
         <button class="btn btn-primary btn-full" onclick="saveEditBoard()">저장</button>
       </div>
     </div>

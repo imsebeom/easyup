@@ -416,6 +416,7 @@ let selectedFiles = [];
 let unsubscribe = null;
 let unsubscribeGallery = null;
 let allBoards = [];
+let boardClassMap = {}; // boardCode -> [classTitle, ...]
 let currentSort = 'createdAt';
 let currentSortDir = 'desc';
 let showingHidden = false;
@@ -2340,7 +2341,7 @@ async function loadMyClasses() {
       return;
     }
     const classes = snapshot.docs.map(d => ({ alias: d.id, ...d.data() }));
-    classes.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+    classes.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'ko'));
     container.innerHTML = classes.map(c => `
       <div class="class-card" data-alias="${escapeHtml(c.alias)}">
         <div class="class-card-main">
@@ -3447,9 +3448,29 @@ async function loadMyBoards() {
       const countSnap = await getCountFromServer(collection(db, 'boards', d.id, 'submissions'));
       return { code: d.id, ...data, submissionCount: countSnap.data().count, createdAtMs: data.createdAt?.toMillis() || 0 };
     });
-    allBoards = await Promise.all(countPromises);
+    const classMapPromise = loadBoardClassMap();
+    [allBoards] = await Promise.all([Promise.all(countPromises), classMapPromise]);
     renderDashboard();
   } catch (e) { console.error(e); container.innerHTML = '<div class="empty-state">불러오기 실패</div>'; }
+}
+
+async function loadBoardClassMap() {
+  try {
+    const classesSnap = await getDocs(query(collection(db, 'classes'), where('ownerUid', '==', currentUser.uid)));
+    const map = {};
+    await Promise.all(classesSnap.docs.map(async cDoc => {
+      const classTitle = cDoc.data().title || cDoc.id;
+      const slotsSnap = await getDocs(collection(db, 'classes', cDoc.id, 'slots'));
+      const seen = new Set();
+      slotsSnap.forEach(s => {
+        const code = s.data().boardCode;
+        if (!code || seen.has(code)) return;
+        seen.add(code);
+        (map[code] ||= []).push(classTitle);
+      });
+    }));
+    boardClassMap = map;
+  } catch (e) { console.error(e); boardClassMap = {}; }
 }
 
 function renderDashboard() {
@@ -3490,9 +3511,11 @@ function renderDashboard() {
     else statusBadge = '<span class="badge badge-active">진행중</span>';
     const statusBtnLabel = isPrivate ? '재시작' : isClosed ? '비공개' : '마감';
 
+    const classNames = boardClassMap[b.code] || [];
+    const classSuffix = classNames.length ? ` <span class="board-card-class-suffix">(${escapeHtml(classNames.join(', '))})</span>` : '';
     return `<div class="board-card" data-code="${escapeHtml(b.code)}" data-title="${escapeHtml(b.title)}" data-type="${escapeHtml(b.type || 'assignment')}" draggable="true">
       <div class="board-card-header">
-        <h3>${escapeHtml(b.title)}</h3>
+        <h3>${escapeHtml(b.title)}${classSuffix}</h3>
         ${statusBadge}
       </div>
       <div class="board-card-meta">
@@ -4220,9 +4243,25 @@ window.openEditBoardModal = function() {
     document.getElementById('edit-allow-file').checked = currentBoard.allowFile !== false;
   }
 
+  const isClassify = currentBoard.type === 'classify';
+  document.getElementById('edit-classify-options').style.display = isClassify ? 'block' : 'none';
+  if (isClassify) {
+    const mode = currentBoard.settings?.groupMode || 'individual';
+    document.querySelector(`input[name="edit-classify-mode"][value="${mode}"]`).checked = true;
+    document.getElementById('edit-classify-team-options').style.display = mode === 'team' ? 'block' : 'none';
+    const groupCount = Object.keys(currentBoard.groups || {}).length;
+    document.getElementById('edit-classify-group-count').value = groupCount || 6;
+  }
+
   document.getElementById('edit-board-modal').style.display = 'flex';
   openModalHistory();
 };
+
+document.querySelectorAll('input[name="edit-classify-mode"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    document.getElementById('edit-classify-team-options').style.display = e.target.value === 'team' ? 'block' : 'none';
+  });
+});
 
 window.closeEditBoardModal = function() { closeModal('edit-board-modal'); };
 
@@ -4243,6 +4282,34 @@ window.saveEditBoard = async function() {
     const allowFile = document.getElementById('edit-allow-file').checked;
     if (!allowUrl && !allowText && !allowFile) { toast('최소 하나의 제출 방식을 선택하세요'); return; }
     Object.assign(updateData, { allowUrl, allowText, allowFile });
+  }
+
+  if (currentBoard.type === 'classify') {
+    const newMode = document.querySelector('input[name="edit-classify-mode"]:checked')?.value || 'individual';
+    const oldMode = currentBoard.settings?.groupMode || 'individual';
+    const oldGroups = currentBoard.groups || {};
+
+    if (newMode === 'team') {
+      const newCount = parseInt(document.getElementById('edit-classify-group-count').value) || 6;
+      if (newCount < 2 || newCount > 20) { toast('모둠 수는 2~20 사이여야 합니다'); return; }
+      const newGroups = {};
+      for (let i = 1; i <= newCount; i++) {
+        const gid = `g${i}`;
+        newGroups[gid] = oldGroups[gid] || {
+          name: `${i}모둠`,
+          color: CL_GROUP_COLORS[(i - 1) % CL_GROUP_COLORS.length],
+          members: []
+        };
+      }
+      const removedWithMembers = Object.keys(oldGroups).filter(gid => !newGroups[gid] && (oldGroups[gid].members || []).length > 0);
+      if (removedWithMembers.length && !await showConfirm(`모둠 ${removedWithMembers.length}개가 제거되며 해당 참여자가 미배정 상태가 됩니다. 계속하시겠습니까?`)) return;
+      updateData.settings = { ...(currentBoard.settings || {}), groupMode: 'team' };
+      updateData.groups = newGroups;
+    } else {
+      if (oldMode === 'team' && Object.keys(oldGroups).length && !await showConfirm('개인별로 변경하면 모둠 배정이 모두 사라집니다. 계속하시겠습니까?')) return;
+      updateData.settings = { ...(currentBoard.settings || {}), groupMode: 'individual' };
+      updateData.groups = {};
+    }
   }
 
   try {

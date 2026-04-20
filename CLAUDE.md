@@ -369,4 +369,15 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - 작은 `/alias` 배지(`board-code-badge`) → `https://eleup.kr/alias` 전체 URL 대형 디스플레이로 교체
   - `.class-url-display`: 1.5rem monospace + 점선 보더 + 프라이머리 색, hover 시 채워짐, 모바일 1.1rem
   - 클릭 시 `copyClassStudentLink()`로 클립보드 복사 → 중복되던 "🔗 학생 링크" 버튼 제거
+- [x] 대시보드 보드 카드에 배치된 클래스명 병기 (2026-04-20)
+  - `boardClassMap` (boardCode → [classTitle, ...]): `loadMyBoards`에서 `classes/*/slots` 역매핑 1회 수집
+  - 카드 제목 옆 괄호로 소프트 표시(`.board-card-class-suffix`, primary 색상 0.85rem)
+- [x] 분류하기 보드 편집 모달에서 참여 모드·모둠 수 수정 (2026-04-20)
+  - `edit-classify-options` 블록: 개인/모둠 라디오 + 모둠 수 입력
+  - 모둠 수 축소·모드 전환 시 기존 멤버 유실 경고(`showConfirm`)
+  - 기존 모둠 객체(이름/색/멤버)는 `g1`/`g2`... 인덱스 같으면 보존, 신규 추가분만 기본값으로 채움
+  - `CL.boardUnsub`이 `settings`/`groups` 변화 감지해 즉시 re-render
+- [x] eleup_api.py: `create_classify_board()` 헬퍼 추가 (2026-04-20)
+  - `group_mode` 인자로 개인/모둠 선택, groups 없이 빈 members만 초기화(생성 직후 편집 모달에서 세팅 가능)
+- [x] 대시보드 "내 클래스" 정렬: 생성일 내림차순 → 제목 한글 오름차순 (2026-04-20)
 - [ ] 모바일 반응형 테스트
