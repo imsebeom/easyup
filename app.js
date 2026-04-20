@@ -1797,6 +1797,7 @@ function renderChatMessages() {
       m.thread !== 'public' ? 'chat-msg-dm' : '',
     ].filter(Boolean).join(' ');
     const teacherBadge = m.isTeacher ? ' 👨‍🏫' : '';
+    const displayName = m.isTeacher ? '선생님' : (m.senderName || '');
     // 삭제는 교사(보드 소유자)만 가능 (Firestore rules 기준)
     const actions = teacher ? `<div class="chat-msg-actions">
       <button class="chat-msg-act-btn" data-msg-id="${escapeHtml(m.id)}" data-action="delete" title="삭제">🗑</button>
@@ -1805,7 +1806,7 @@ function renderChatMessages() {
     const mediaHtml = renderChatFilesHtml(m.files || []);
     return `<div class="${klass}" data-msg-id="${escapeHtml(m.id)}">
       <div class="chat-msg-meta">
-        <span class="chat-msg-name">${escapeHtml(m.senderName || '')}${teacherBadge}</span>
+        <span class="chat-msg-name">${escapeHtml(displayName)}${teacherBadge}</span>
         <span class="chat-msg-time">${escapeHtml(time)}</span>
       </div>
       ${textHtml}
@@ -1930,7 +1931,7 @@ window.sendChatMessage = async function() {
     const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const payload = {
       text: text || '',
-      senderName: teacher ? (currentUser?.displayName || currentUser?.email || '교사') : studentName,
+      senderName: teacher ? '선생님' : studentName,
       senderDeviceId: deviceId,
       senderUid: teacher ? (currentUser?.uid || null) : null,
       isTeacher: !!teacher,
@@ -3234,6 +3235,7 @@ function renderClassChatMessages() {
       m.thread !== 'public' ? 'chat-msg-dm' : '',
     ].filter(Boolean).join(' ');
     const teacherBadge = m.isTeacher ? ' 👨‍🏫' : '';
+    const displayName = m.isTeacher ? '선생님' : (m.senderName || '');
     const actions = teacher ? `<div class="chat-msg-actions">
       <button class="chat-msg-act-btn" data-msg-id="${escapeHtml(m.id)}" data-action="delete" title="삭제">🗑</button>
     </div>` : '';
@@ -3241,7 +3243,7 @@ function renderClassChatMessages() {
     const mediaHtml = renderChatFilesHtml(m.files || []);
     return `<div class="${klass}" data-msg-id="${escapeHtml(m.id)}">
       <div class="chat-msg-meta">
-        <span class="chat-msg-name">${escapeHtml(m.senderName || '')}${teacherBadge}</span>
+        <span class="chat-msg-name">${escapeHtml(displayName)}${teacherBadge}</span>
         <span class="chat-msg-time">${escapeHtml(time)}</span>
       </div>
       ${textHtml}
@@ -3314,7 +3316,7 @@ window.sendClassChatMessage = async function() {
   if (!classChatContext) return;
 
   const teacher = isClassChatTeacher();
-  const senderName = getClassChatName();
+  const senderName = teacher ? '선생님' : getClassChatName();
   if (!teacher && !senderName) { toast('먼저 이름을 입력하세요'); return; }
   if (hasFile && !teacher) { toast('파일 첨부는 교사만 가능합니다'); return; }
 
