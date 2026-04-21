@@ -380,4 +380,7 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
 - [x] eleup_api.py: `create_classify_board()` 헬퍼 추가 (2026-04-20)
   - `group_mode` 인자로 개인/모둠 선택, groups 없이 빈 members만 초기화(생성 직후 편집 모달에서 세팅 가능)
 - [x] 대시보드 "내 클래스" 정렬: 생성일 내림차순 → 제목 한글 오름차순 (2026-04-20)
+- [x] 분류하기 학생 뷰 UX 개선 (2026-04-21)
+  - 접속 화면(`name-view`) 입력 순서를 "모둠 선택 → 이름" 순으로 교체 (팀 모드에서 맥락상 모둠이 먼저)
+  - `clShowMoveDialog`에 `CL.workspaceId` 필터 추가 — 카드 이동 모달에 다른 모둠/개인 워크스페이스의 분류기준이 섞여 나오던 버그 수정
 - [ ] 모바일 반응형 테스트

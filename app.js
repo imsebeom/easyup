@@ -6625,8 +6625,11 @@ window.clHideColorPicker = function() {
 window.clShowMoveDialog = function(cardId) {
   const card = CL.cardMap[cardId];
   if (!card) return;
-  // Show prompt with category list
-  const categories = CL.allCards.filter(c => c.cardType === 'category' && c.id !== cardId);
+  // Show prompt with category list (current workspace only)
+  const categories = CL.allCards.filter(c =>
+    c.cardType === 'category' && c.id !== cardId &&
+    (CL.workspaceId ? c.workspaceId === CL.workspaceId : true)
+  );
   if (categories.length === 0) { toast('이동할 카테고리가 없습니다'); return; }
 
   const modal = document.getElementById('cl-move-modal');
