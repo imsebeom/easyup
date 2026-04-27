@@ -944,7 +944,7 @@ function showNameView() {
   if (currentBoard?.type === 'classify' && currentBoard?.settings?.groupMode === 'team') {
     const groups = currentBoard.groups || {};
     const members = currentBoard.members || {};
-    teamSelect.innerHTML = Object.entries(groups)
+    const optionsHtml = Object.entries(groups)
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([gId, g]) => {
         const gMembers = Object.entries(members).filter(([, m]) => m.groupId === gId).map(([, m]) => m.name);
@@ -952,7 +952,8 @@ function showNameView() {
         return `<option value="${gId}">${g.name}${memberStr}</option>`;
       })
       .join('');
-    // Restore saved group selection
+    teamSelect.innerHTML = `<option value="" disabled selected>모둠을 선택하세요</option>${optionsHtml}`;
+    // Restore saved group selection (returning student keeps their group)
     const savedGroupId = localStorage.getItem(`easyup_group_${currentBoardCode}`);
     if (savedGroupId && groups[savedGroupId]) teamSelect.value = savedGroupId;
     teamSelectDiv.style.display = 'block';
