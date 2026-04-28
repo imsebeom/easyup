@@ -1569,8 +1569,8 @@ async function rotateSubmissionImage(submissionId, fileIdx, btnEl, opts = {}) {
 
     if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳'; didDisable = true; }
 
-    // 1) 원본 다운로드
-    const resp = await fetch(file.url);
+    // 1) 원본 다운로드 (브라우저 캐시 우회 — 직전 회전본을 받아야 함)
+    const resp = await fetch(file.url, { cache: 'no-store' });
     if (!resp.ok) throw new Error('이미지 다운로드 실패');
     const origBlob = await resp.blob();
     const origFile = new File([origBlob], file.name, { type: origBlob.type });
@@ -1578,10 +1578,12 @@ async function rotateSubmissionImage(submissionId, fileIdx, btnEl, opts = {}) {
     // 2) 90° 회전 후 재인코딩
     const rotated = await rotateImageFile(origFile, 90);
 
-    // 3) 같은 Storage 경로에 덮어쓰기
+    // 3) 같은 Storage 경로에 덮어쓰기 (cacheControl 짧게 → 다른 클라이언트도 빨리 갱신)
     const storageRef = ref(storage, file.path);
-    await uploadBytesResumable(storageRef, rotated);
-    const newUrl = await getDownloadURL(storageRef);
+    await uploadBytesResumable(storageRef, rotated, { cacheControl: 'public,max-age=10' });
+    const baseUrl = await getDownloadURL(storageRef);
+    // URL에 cache-buster 부착 → onSnapshot 재렌더 시 브라우저가 새 이미지로 인식
+    const newUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'cb=' + Date.now();
 
     // 4) Firestore 갱신
     const newFiles = (data.files || []).map((f, i) => i === fileIdx
@@ -2564,8 +2566,8 @@ window.applyCrop = async function() {
     const bw = boxW / dispW;
     const bh = boxH / dispH;
 
-    // 원본 이미지 다운로드
-    const resp = await fetch(file.url);
+    // 원본 이미지 다운로드 (캐시 우회)
+    const resp = await fetch(file.url, { cache: 'no-store' });
     const blob = await resp.blob();
     const img = new Image();
     img.src = URL.createObjectURL(blob);
@@ -2590,8 +2592,9 @@ window.applyCrop = async function() {
 
     // Storage 덮어쓰기
     const storageRef = ref(storage, file.path);
-    await uploadBytesResumable(storageRef, outBlob);
-    const newUrl = await getDownloadURL(storageRef);
+    await uploadBytesResumable(storageRef, outBlob, { cacheControl: 'public,max-age=10' });
+    const baseUrl = await getDownloadURL(storageRef);
+    const newUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'cb=' + Date.now();
 
     // Firestore 갱신
     const subRef = doc(db, 'boards', currentBoardCode, 'submissions', submissionId);
