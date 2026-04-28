@@ -1138,6 +1138,9 @@ function renderGallery(docs) {
     // Use data-id attribute instead of inline onclick with string interpolation (XSS safe)
     // 미디어 썸네일은 카드 최상단(edge-to-edge)으로 분리, 텍스트/URL 프리뷰는 제목 아래에 유지
     const isMediaPreview = data.files?.length && data.type !== 'url' && data.type !== 'text';
+    // 회전 가능한 첫 이미지 인덱스 (본인 카드용)
+    const firstImageIdx = (data.files || []).findIndex(f => f.path && getMediaType(f.name) === 'image');
+    const canRotate = isMine && !isBoardClosed() && firstImageIdx >= 0;
     return `
       <div class="gallery-card ${isMine ? 'gallery-card-mine' : ''}" data-id="${escapeHtml(d.id)}">
         ${isMine ? '<div class="mine-badge">내 제출</div>' : ''}
@@ -1160,6 +1163,7 @@ function renderGallery(docs) {
         </div>
         ${isMine && !isBoardClosed() ? `
           <div class="card-actions">
+            ${canRotate ? `<button class="btn-icon btn-rotate" data-id="${escapeHtml(d.id)}" data-file-idx="${firstImageIdx}" title="이미지 90° 회전">🔄</button>` : ''}
             <button class="btn-icon btn-edit" data-id="${escapeHtml(d.id)}" title="수정">✏️</button>
             <button class="btn-icon btn-icon-danger btn-del" data-id="${escapeHtml(d.id)}" title="삭제">🗑</button>
           </div>
@@ -1177,6 +1181,9 @@ document.getElementById('gallery-grid').addEventListener('click', (e) => {
 
   const delBtn = e.target.closest('.btn-del');
   if (delBtn) { e.stopPropagation(); removeSubmission(delBtn.dataset.id, { checkOwnership: true }); return; }
+
+  const rotBtn = e.target.closest('.btn-rotate');
+  if (rotBtn) { e.stopPropagation(); rotateSubmissionImage(rotBtn.dataset.id, Number(rotBtn.dataset.fileIdx), rotBtn, { fromCard: true }); return; }
 
   const starBtn = e.target.closest('.star-btn');
   if (starBtn && !starBtn.disabled) { e.stopPropagation(); toggleStar(currentBoardCode, starBtn.dataset.id); return; }
@@ -1539,20 +1546,28 @@ document.getElementById('detail-modal').addEventListener('click', (e) => {
   }
 });
 
-/** 교사: 제출된 이미지를 90° 회전하여 같은 Storage 경로에 덮어쓰고 URL을 갱신 */
-async function rotateSubmissionImage(submissionId, fileIdx, btnEl) {
-  if (!isCurrentBoardTeacher()) return;
+/** 제출된 이미지를 90° 회전하여 같은 Storage 경로에 덮어쓰고 URL을 갱신.
+ *  교사는 모든 제출물, 학생은 본인 제출물만 가능. 보드 마감 시 학생은 차단.
+ *  opts.fromCard=true면 모달 대신 갤러리 그리드 자동 갱신(onSnapshot)에 의존. */
+async function rotateSubmissionImage(submissionId, fileIdx, btnEl, opts = {}) {
   const subRef = doc(db, 'boards', currentBoardCode, 'submissions', submissionId);
   const prevText = btnEl?.textContent;
+  let didDisable = false;
   try {
-    if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳'; }
     const subDoc = await getDoc(subRef);
     if (!subDoc.exists()) { toast('제출물 없음'); return; }
     const data = subDoc.data();
+    const teacher = isCurrentBoardTeacher();
+    const isOwner = data.deviceId === deviceId;
+    if (!teacher && !isOwner) { toast('권한이 없습니다'); return; }
+    if (!teacher && isBoardClosed()) { toast('마감된 보드입니다'); return; }
     const file = data.files?.[fileIdx];
     if (!file?.path) { toast('파일 경로 정보 없음 (구버전 업로드)'); return; }
+    if (getMediaType(file.name) !== 'image') { toast('이미지 파일이 아닙니다'); return; }
 
-    // 1) 이미지 다운로드 (CORS 우회: storage SDK 미지원, fetch 사용)
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳'; didDisable = true; }
+
+    // 1) 원본 다운로드
     const resp = await fetch(file.url);
     if (!resp.ok) throw new Error('이미지 다운로드 실패');
     const origBlob = await resp.blob();
@@ -1566,19 +1581,19 @@ async function rotateSubmissionImage(submissionId, fileIdx, btnEl) {
     await uploadBytesResumable(storageRef, rotated);
     const newUrl = await getDownloadURL(storageRef);
 
-    // 4) Firestore 갱신 (해당 file 항목의 url/size 업데이트, 캐시 버스터)
+    // 4) Firestore 갱신
     const newFiles = (data.files || []).map((f, i) => i === fileIdx
       ? { ...f, url: newUrl, size: rotated.size }
       : f);
     await updateDoc(subRef, { files: newFiles });
 
-    // 5) 모달 즉시 갱신
-    openDetail(submissionId);
+    // 5) UI 갱신
+    if (!opts.fromCard) openDetail(submissionId);
     toast('회전 완료');
   } catch (e) {
     console.error('rotate image failed', e);
     toast('회전 실패: ' + (e.message || e));
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = prevText || '🔄'; }
+    if (btnEl && didDisable) { btnEl.disabled = false; btnEl.textContent = prevText || '🔄'; }
   }
 }
 
