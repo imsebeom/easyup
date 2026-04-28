@@ -431,6 +431,7 @@ let unsubscribeClassifyGallery = null;
 let unsubscribeClassifyBoard = null;
 let galleryDocs = [];
 let gallerySort = 'recent'; // 'recent' | 'stars'
+const commentCountCache = new Map(); // submissionId → count (재렌더 시 깜박임 방지)
 let currentDetailIndex = -1;
 let unsubscribeComments = null;
 let unsubscribeBoardDoc = null; // board doc listener for allowPeek sync
@@ -1154,7 +1155,7 @@ function renderGallery(docs) {
             ${starred ? '⭐' : '☆'} <span class="star-count">${stars.length}</span>
           </button>
           <button class="comment-btn" data-id="${escapeHtml(d.id)}" title="댓글">
-            💬 <span class="card-comment-count" data-sub-id="${escapeHtml(d.id)}">0</span>
+            💬 <span class="card-comment-count" data-sub-id="${escapeHtml(d.id)}">${commentCountCache.get(d.id) ?? 0}</span>
           </button>
         </div>
         ${isMine && !isBoardClosed() ? `
@@ -1332,17 +1333,19 @@ window.closeDetailModal = function() {
 async function loadCommentCounts(submissionIds) {
   const code = currentBoardCode;
   await Promise.all(submissionIds.map(async (id) => {
-    const el = document.querySelector(`.card-comment-count[data-sub-id="${id}"]`);
-    if (!el) return;
     try {
       const snap = await getCountFromServer(collection(db, 'boards', code, 'submissions', id, 'comments'));
       const count = snap.data().count;
+      commentCountCache.set(id, count);
+      const el = document.querySelector(`.card-comment-count[data-sub-id="${id}"]`);
+      if (!el) return;
       // 학생 카드(comment-btn 내부 span): 숫자만 표시
       // 교사 카드(div): 0건은 비우고, 1건 이상은 배지
       if (el.tagName === 'SPAN') {
-        el.textContent = count;
+        if (el.textContent !== String(count)) el.textContent = count;
       } else {
-        el.innerHTML = count > 0 ? `<span class="card-comment-badge">💬 ${count}</span>` : '';
+        const newHtml = count > 0 ? `<span class="card-comment-badge">💬 ${count}</span>` : '';
+        if (el.innerHTML !== newHtml) el.innerHTML = newHtml;
       }
     } catch (_) {}
   }));
@@ -4607,7 +4610,7 @@ function renderSubmissions(docs) {
         <h3 class="card-title">${escapeHtml(data.title || '(제목 없음)')}</h3>
         ${!isMediaPreview ? preview : ''}
         ${data.memo ? `<div class="card-memo">💬 ${escapeHtml(data.memo)}</div>` : ''}
-        <div class="card-comment-count" data-sub-id="${escapeHtml(d.id)}"></div>
+        <div class="card-comment-count" data-sub-id="${escapeHtml(d.id)}">${commentCountCache.get(d.id) > 0 ? `<span class="card-comment-badge">💬 ${commentCountCache.get(d.id)}</span>` : ''}</div>
         <div class="card-footer">
           <span class="card-author">${escapeHtml(data.name)}</span>
           <span class="card-time">${time}${updated}</span>
