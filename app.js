@@ -282,13 +282,17 @@ function getMediaType(filename) {
 }
 
 /** Render file links/embeds HTML (detail modal) */
-function renderFileLinksHtml(files) {
+function renderFileLinksHtml(files, opts = {}) {
   if (!files?.length) return '';
+  const { submissionId, allowRotate } = opts;
   return '<div class="submission-files">' +
-    files.map(f => {
+    files.map((f, i) => {
       const media = getMediaType(f.name);
       if (media === 'image') {
-        return `<div class="file-media"><img class="file-embed-img" src="${escapeHtml(f.url)}" alt="${escapeHtml(f.name)}" loading="lazy"><div class="file-media-name">${escapeHtml(f.name)} (${formatSize(f.size)})</div></div>`;
+        const rotateBtn = allowRotate && submissionId
+          ? `<button class="file-media-rotate" data-sub-id="${escapeHtml(submissionId)}" data-file-idx="${i}" title="이미지 90° 회전">🔄</button>`
+          : '';
+        return `<div class="file-media"><img class="file-embed-img" src="${escapeHtml(f.url)}" alt="${escapeHtml(f.name)}" loading="lazy">${rotateBtn}<div class="file-media-name">${escapeHtml(f.name)} (${formatSize(f.size)})</div></div>`;
       }
       if (media === 'video') {
         return `<div class="file-media"><video class="file-embed-video" src="${escapeHtml(f.url)}" controls preload="metadata"></video><div class="file-media-name">${escapeHtml(f.name)} (${formatSize(f.size)})</div></div>`;
@@ -1239,7 +1243,7 @@ async function openDetail(submissionId, opts = {}) {
       html += `<div class="detail-content detail-text-content">${escapeHtml(data.content)}</div>`;
     }
 
-    html += renderFileLinksHtml(data.files);
+    html += renderFileLinksHtml(data.files, { submissionId, allowRotate: isCurrentBoardTeacher() });
     if (data.memo) html += `<div class="detail-memo">💬 ${escapeHtml(data.memo)}</div>`;
 
     // Comments section
@@ -1526,7 +1530,57 @@ document.getElementById('detail-modal').addEventListener('click', (e) => {
     deleteComment(subBtn.dataset.submissionId, delBtn.dataset.commentId);
     return;
   }
+
+  const rotBtn = e.target.closest('.file-media-rotate');
+  if (rotBtn) {
+    e.stopPropagation();
+    rotateSubmissionImage(rotBtn.dataset.subId, Number(rotBtn.dataset.fileIdx), rotBtn);
+    return;
+  }
 });
+
+/** 교사: 제출된 이미지를 90° 회전하여 같은 Storage 경로에 덮어쓰고 URL을 갱신 */
+async function rotateSubmissionImage(submissionId, fileIdx, btnEl) {
+  if (!isCurrentBoardTeacher()) return;
+  const subRef = doc(db, 'boards', currentBoardCode, 'submissions', submissionId);
+  const prevText = btnEl?.textContent;
+  try {
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳'; }
+    const subDoc = await getDoc(subRef);
+    if (!subDoc.exists()) { toast('제출물 없음'); return; }
+    const data = subDoc.data();
+    const file = data.files?.[fileIdx];
+    if (!file?.path) { toast('파일 경로 정보 없음 (구버전 업로드)'); return; }
+
+    // 1) 이미지 다운로드 (CORS 우회: storage SDK 미지원, fetch 사용)
+    const resp = await fetch(file.url);
+    if (!resp.ok) throw new Error('이미지 다운로드 실패');
+    const origBlob = await resp.blob();
+    const origFile = new File([origBlob], file.name, { type: origBlob.type });
+
+    // 2) 90° 회전 후 재인코딩
+    const rotated = await rotateImageFile(origFile, 90);
+
+    // 3) 같은 Storage 경로에 덮어쓰기
+    const storageRef = ref(storage, file.path);
+    await uploadBytesResumable(storageRef, rotated);
+    const newUrl = await getDownloadURL(storageRef);
+
+    // 4) Firestore 갱신 (해당 file 항목의 url/size 업데이트, 캐시 버스터)
+    const newFiles = (data.files || []).map((f, i) => i === fileIdx
+      ? { ...f, url: newUrl, size: rotated.size }
+      : f);
+    await updateDoc(subRef, { files: newFiles });
+
+    // 5) 모달 즉시 갱신
+    openDetail(submissionId);
+    toast('회전 완료');
+  } catch (e) {
+    console.error('rotate image failed', e);
+    toast('회전 실패: ' + (e.message || e));
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = prevText || '🔄'; }
+  }
+}
 
 // Enter key to submit comment (Shift+Enter for newline), ESC to cancel edit
 document.getElementById('detail-modal').addEventListener('keydown', (e) => {
