@@ -244,6 +244,11 @@ body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',
 .card-comment-count { min-height:0; }
 .card-comment-badge { font-size:.8rem; color:var(--text-light); }
 
+/* 교사 카드 통계 배지 (별·댓글 분리 표시) */
+.card-stats { display:flex; gap:8px; align-items:center; margin-top:4px; }
+.card-stat-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; background:var(--bg); border:1px solid var(--border); border-radius:12px; font-size:.78rem; color:var(--text-light); }
+.card-stat-badge .cs-num { font-weight:700; color:var(--text); }
+
 /* ── Dashboard ── */
 #dashboard-view.active {
   position:fixed; inset:0; display:flex; flex-direction:column;

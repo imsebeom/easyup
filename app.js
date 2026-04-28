@@ -1339,13 +1339,15 @@ async function loadCommentCounts(submissionIds) {
       commentCountCache.set(id, count);
       const el = document.querySelector(`.card-comment-count[data-sub-id="${id}"]`);
       if (!el) return;
-      // 학생 카드(comment-btn 내부 span): 숫자만 표시
-      // 교사 카드(div): 0건은 비우고, 1건 이상은 배지
+      // 새 구조(학생/교사 공용): .cs-num 자식 span에 숫자만 갱신
+      const numEl = el.querySelector('.cs-num');
+      if (numEl) {
+        if (numEl.textContent !== String(count)) numEl.textContent = count;
+        return;
+      }
+      // 구버전 학생 카드(SPAN 자체) — 숫자만 표시
       if (el.tagName === 'SPAN') {
         if (el.textContent !== String(count)) el.textContent = count;
-      } else {
-        const newHtml = count > 0 ? `<span class="card-comment-badge">💬 ${count}</span>` : '';
-        if (el.innerHTML !== newHtml) el.innerHTML = newHtml;
       }
     } catch (_) {}
   }));
@@ -4606,6 +4608,8 @@ function renderSubmissions(docs) {
     const isMediaPreview = data.files?.length && data.type !== 'url' && data.type !== 'text';
     const firstImageIdx = (data.files || []).findIndex(f => f.path && getMediaType(f.name) === 'image');
     const hasImage = firstImageIdx >= 0;
+    const starCount = (data.stars || []).length;
+    const commentCount = commentCountCache.get(d.id) ?? 0;
     return `
       <div class="gallery-card" data-id="${escapeHtml(d.id)}" draggable="true">
         ${isMediaPreview ? preview : ''}
@@ -4613,7 +4617,10 @@ function renderSubmissions(docs) {
         <h3 class="card-title">${escapeHtml(data.title || '(제목 없음)')}</h3>
         ${!isMediaPreview ? preview : ''}
         ${data.memo ? `<div class="card-memo">💬 ${escapeHtml(data.memo)}</div>` : ''}
-        <div class="card-comment-count" data-sub-id="${escapeHtml(d.id)}">${commentCountCache.get(d.id) > 0 ? `<span class="card-comment-badge">💬 ${commentCountCache.get(d.id)}</span>` : ''}</div>
+        <div class="card-stats">
+          <span class="card-stat-badge"><span class="cs-icon">⭐</span><span class="cs-num">${starCount}</span></span>
+          <span class="card-stat-badge card-comment-count" data-sub-id="${escapeHtml(d.id)}"><span class="cs-icon">💬</span><span class="cs-num">${commentCount}</span></span>
+        </div>
         <div class="card-footer">
           <span class="card-author">${escapeHtml(data.name)}</span>
           <span class="card-time">${time}${updated}</span>
