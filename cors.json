@@ -1,0 +1,14 @@
+[
+  {
+    "origin": [
+      "https://eleup.kr",
+      "https://easyup-1604e.web.app",
+      "https://easyup-1604e.firebaseapp.com",
+      "http://localhost:5000",
+      "http://localhost:3000"
+    ],
+    "method": ["GET", "HEAD"],
+    "responseHeader": ["Content-Type", "Content-Length", "Content-Disposition", "Authorization"],
+    "maxAgeSeconds": 3600
+  }
+]
