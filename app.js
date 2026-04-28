@@ -2156,6 +2156,10 @@ function resetSubmitForm() {
   existingFiles = null;
   teacherEditMode = false;
   selectedFiles = [];
+  // 미리보기 URL 메모리 해제
+  document.querySelectorAll('#file-list img[data-preview-url]').forEach(img => {
+    try { URL.revokeObjectURL(img.dataset.previewUrl); } catch (_) {}
+  });
   document.getElementById('submit-title-input').value = '';
   document.getElementById('submit-url').value = '';
   document.getElementById('submit-text').value = '';
@@ -2227,12 +2231,27 @@ function addFiles(fileList) {
 }
 
 function renderFileList() {
-  document.getElementById('file-list').innerHTML = selectedFiles.map((f, i) => `
-    <div class="file-item">
-      <span>📄 ${escapeHtml(f.name)} (${formatSize(f.size)})</span>
-      <button data-idx="${i}" class="file-remove-btn">✕</button>
-    </div>
-  `).join('');
+  // 이전 미리보기 URL 정리 (메모리 누수 방지)
+  document.querySelectorAll('#file-list img[data-preview-url]').forEach(img => {
+    try { URL.revokeObjectURL(img.dataset.previewUrl); } catch (_) {}
+  });
+  document.getElementById('file-list').innerHTML = selectedFiles.map((f, i) => {
+    const isImage = getMediaType(f.name) === 'image';
+    let preview;
+    if (isImage) {
+      const url = URL.createObjectURL(f);
+      preview = `<img class="file-preview-thumb" src="${url}" data-preview-url="${url}" alt="">`;
+    } else {
+      preview = '<span class="file-preview-icon">📄</span>';
+    }
+    return `
+      <div class="file-item">
+        ${preview}
+        <span class="file-item-name">${escapeHtml(f.name)} <small>(${formatSize(f.size)})</small></span>
+        <button data-idx="${i}" class="file-remove-btn">✕</button>
+      </div>
+    `;
+  }).join('');
 }
 
 document.getElementById('file-list').addEventListener('click', (e) => {
