@@ -214,6 +214,10 @@
       <div id="gallery-deadline" class="deadline-notice" style="display:none"></div>
       <div class="gallery-toolbar">
         <span id="gallery-count" class="count-badge"></span>
+        <select id="gallery-sort" class="gallery-sort-select" onchange="changeGallerySort(this.value)">
+          <option value="recent">최신 순</option>
+          <option value="stars">⭐ 별 많은 순</option>
+        </select>
       </div>
       <div id="gallery-grid" class="gallery-grid">
         <div class="empty-state">아직 제출물이 없습니다. 첫 번째로 제출해보세요!</div>
@@ -452,6 +456,7 @@
         <div class="gallery-header-right class-header-right">
           <button type="button" class="class-url-display" id="class-alias-badge" onclick="copyClassStudentLink()" title="클릭하여 복사"></button>
           <div class="class-header-actions">
+            <button class="btn btn-small class-chat-toggle-btn" onclick="toggleClassChatPanel()" title="대화">💬 대화<span class="chat-unread-dot" style="display:none"></span></button>
             <button class="btn btn-small" onclick="openEditClassModal()">✏️</button>
             <button class="btn btn-small btn-danger" onclick="deleteClass()">🗑</button>
           </div>
@@ -482,6 +487,7 @@
         </div>
         <div class="gallery-header-right">
           <span id="class-student-today" class="student-badge"></span>
+          <button class="btn btn-small class-chat-toggle-btn" onclick="toggleClassChatPanel()" title="대화">💬 대화<span class="chat-unread-dot" style="display:none"></span></button>
         </div>
       </header>
       <div class="class-week-controls">
@@ -832,6 +838,7 @@
       </div>
       <div class="chat-panel-header-actions">
         <button id="class-chat-public-toggle" class="chat-panel-close" style="display:none" onclick="toggleClassChatPublic()" title="전체 채팅 활성/비활성"></button>
+        <button class="chat-panel-close" onclick="toggleClassChatPanel()" title="닫기">✕</button>
       </div>
     </div>
     <div id="class-chat-name-gate" class="class-chat-name-gate" style="display:none">

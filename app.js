@@ -430,6 +430,7 @@ let unsubscribeInquiryBoard = null;
 let unsubscribeClassifyGallery = null;
 let unsubscribeClassifyBoard = null;
 let galleryDocs = [];
+let gallerySort = 'recent'; // 'recent' | 'stars'
 let currentDetailIndex = -1;
 let unsubscribeComments = null;
 let unsubscribeBoardDoc = null; // board doc listener for allowPeek sync
@@ -1051,6 +1052,11 @@ function showGallery() {
   document.getElementById('gallery-student-name').textContent = studentName;
   renderDeadline('gallery-deadline', currentBoard.deadline);
 
+  // 정렬 초기화
+  gallerySort = 'recent';
+  const sortSel = document.getElementById('gallery-sort');
+  if (sortSel) sortSel.value = 'recent';
+
   // 마감 시 플로팅 제출 버튼 숨기기
   const fab = document.querySelector('#gallery-view .fab');
   if (fab) fab.style.display = isBoardClosed() ? 'none' : '';
@@ -1093,7 +1099,20 @@ function renderGallery(docs) {
     return;
   }
 
-  grid.innerHTML = docs.map(d => {
+  // 정렬: stars 옵션 시 별 많은 순, 그 외에는 기본(createdAt desc 유지)
+  let sortedDocs = docs;
+  if (gallerySort === 'stars') {
+    sortedDocs = [...docs].sort((a, b) => {
+      const sa = (a.data().stars || []).length;
+      const sb = (b.data().stars || []).length;
+      if (sb !== sa) return sb - sa;
+      const ta = a.data().createdAt?.toMillis?.() || 0;
+      const tb = b.data().createdAt?.toMillis?.() || 0;
+      return tb - ta;
+    });
+  }
+
+  grid.innerHTML = sortedDocs.map(d => {
     const data = d.data();
     const isMine = data.deviceId === deviceId;
     const time = data.createdAt ? formatDateShort(data.createdAt.toDate()) : '';
@@ -1110,6 +1129,8 @@ function renderGallery(docs) {
     }
 
     const updated = data.updatedAt ? ' · 수정됨' : '';
+    const stars = data.stars || [];
+    const starred = stars.includes(deviceId);
     // Use data-id attribute instead of inline onclick with string interpolation (XSS safe)
     return `
       <div class="gallery-card ${isMine ? 'gallery-card-mine' : ''}" data-id="${escapeHtml(d.id)}">
@@ -1122,6 +1143,11 @@ function renderGallery(docs) {
         <div class="card-footer">
           <span class="card-author">${escapeHtml(data.name)}</span>
           <span class="card-time">${time}${updated}</span>
+        </div>
+        <div class="card-reactions">
+          <button class="star-btn ${starred ? 'starred' : ''}" data-id="${escapeHtml(d.id)}" title="${isMine ? '내 게시물' : (starred ? '별 취소' : '별 주기')}" ${isMine ? 'disabled' : ''}>
+            ${starred ? '⭐' : '☆'} <span class="star-count">${stars.length}</span>
+          </button>
         </div>
         ${isMine && !isBoardClosed() ? `
           <div class="card-actions">
@@ -1143,9 +1169,35 @@ document.getElementById('gallery-grid').addEventListener('click', (e) => {
   const delBtn = e.target.closest('.btn-del');
   if (delBtn) { e.stopPropagation(); removeSubmission(delBtn.dataset.id, { checkOwnership: true }); return; }
 
+  const starBtn = e.target.closest('.star-btn');
+  if (starBtn && !starBtn.disabled) { e.stopPropagation(); toggleStar(currentBoardCode, starBtn.dataset.id); return; }
+
   const card = e.target.closest('.gallery-card');
   if (card?.dataset.id) openDetail(card.dataset.id);
 });
+
+// ── Gallery Sort ──
+window.changeGallerySort = function(value) {
+  gallerySort = value;
+  if (galleryDocs?.length) renderGallery(galleryDocs);
+};
+
+// ── Star Toggle (Assignment) ──
+async function toggleStar(boardCode, submissionId) {
+  if (isBoardClosed()) { toast('마감된 보드입니다'); return; }
+  const subRef = doc(db, 'boards', boardCode, 'submissions', submissionId);
+  try {
+    const subDoc = await getDoc(subRef);
+    if (!subDoc.exists()) return;
+    const data = subDoc.data();
+    if (data.deviceId === deviceId) return; // 본인 게시물은 제외
+    const stars = data.stars || [];
+    const starred = stars.includes(deviceId);
+    await updateDoc(subRef, {
+      stars: starred ? stars.filter(id => id !== deviceId) : [...stars, deviceId]
+    });
+  } catch (e) { console.error(e); toast('오류 발생'); }
+}
 
 // ── Detail Modal ──
 async function openDetail(submissionId) {
@@ -3001,14 +3053,18 @@ function countClassChatUnread(thread) {
   } catch { return 0; }
 }
 
+let classChatOpen = false;
 function setupClassChat(alias, isTeacher) {
   if (!alias) { cleanupClassChat(); return; }
   classChatContext = { alias, isTeacher, data: {} };
   classChatMessages = [];
   classChatActiveThread = 'public';
+  classChatOpen = false;
   const panel = document.getElementById('class-chat-panel');
-  if (panel) panel.style.display = 'flex';
+  if (panel) { panel.style.display = 'none'; panel.classList.remove('open'); }
   document.body.classList.add('class-chat-active');
+  document.querySelectorAll('.class-chat-toggle-btn').forEach(b => b.style.display = '');
+  updateClassChatUnreadBadge();
 
   if (unsubscribeClassChat) unsubscribeClassChat();
   if (unsubscribeClassChatDoc) unsubscribeClassChatDoc();
@@ -3019,7 +3075,8 @@ function setupClassChat(alias, isTeacher) {
     classChatMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderClassChatTabs();
     renderClassChatMessages();
-    markClassChatSeen(classChatActiveThread);
+    if (classChatOpen) markClassChatSeen(classChatActiveThread);
+    updateClassChatUnreadBadge();
   }, (err) => console.error('class chat listener error', err));
 
   // 클래스 doc (members/chatPublicEnabled) 실시간 수신
@@ -3047,9 +3104,42 @@ function cleanupClassChat() {
   classChatMessages = [];
   classChatActiveThread = 'public';
   classChatContext = null;
+  classChatOpen = false;
   const panel = document.getElementById('class-chat-panel');
-  if (panel) panel.style.display = 'none';
+  if (panel) { panel.classList.remove('open'); panel.style.display = 'none'; }
   document.body.classList.remove('class-chat-active');
+  document.querySelectorAll('.class-chat-toggle-btn').forEach(b => b.style.display = 'none');
+}
+
+window.toggleClassChatPanel = function() {
+  const panel = document.getElementById('class-chat-panel');
+  if (!panel) return;
+  classChatOpen = !classChatOpen;
+  if (classChatOpen) {
+    panel.style.display = 'flex';
+    requestAnimationFrame(() => panel.classList.add('open'));
+    markClassChatSeen(classChatActiveThread);
+    updateClassChatUnreadBadge();
+    setTimeout(() => {
+      const body = document.getElementById('class-chat-messages');
+      if (body) body.scrollTop = body.scrollHeight;
+      document.getElementById('class-chat-input')?.focus();
+    }, 50);
+  } else {
+    panel.classList.remove('open');
+    setTimeout(() => { if (!classChatOpen) panel.style.display = 'none'; }, 300);
+  }
+};
+
+function updateClassChatUnreadBadge() {
+  const total = classChatMessages.length === 0 ? 0
+    : Array.from(new Set(classChatMessages.map(m => m.thread)))
+        .reduce((sum, t) => sum + countClassChatUnread(t), 0);
+  document.querySelectorAll('.class-chat-toggle-btn').forEach(btn => {
+    const dot = btn.querySelector('.chat-unread-dot');
+    if (dot) dot.style.display = total > 0 && !classChatOpen ? '' : 'none';
+    btn.classList.toggle('has-unread', total > 0 && !classChatOpen);
+  });
 }
 
 async function registerClassStudentPresence() {
