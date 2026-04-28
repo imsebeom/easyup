@@ -282,17 +282,13 @@ function getMediaType(filename) {
 }
 
 /** Render file links/embeds HTML (detail modal) */
-function renderFileLinksHtml(files, opts = {}) {
+function renderFileLinksHtml(files) {
   if (!files?.length) return '';
-  const { submissionId, allowRotate } = opts;
   return '<div class="submission-files">' +
-    files.map((f, i) => {
+    files.map(f => {
       const media = getMediaType(f.name);
       if (media === 'image') {
-        const rotateBtn = allowRotate && submissionId
-          ? `<button class="file-media-rotate" data-sub-id="${escapeHtml(submissionId)}" data-file-idx="${i}" title="이미지 90° 회전">🔄</button>`
-          : '';
-        return `<div class="file-media"><img class="file-embed-img" src="${escapeHtml(f.url)}" alt="${escapeHtml(f.name)}" loading="lazy">${rotateBtn}<div class="file-media-name">${escapeHtml(f.name)} (${formatSize(f.size)})</div></div>`;
+        return `<div class="file-media"><img class="file-embed-img" src="${escapeHtml(f.url)}" alt="${escapeHtml(f.name)}" loading="lazy"><div class="file-media-name">${escapeHtml(f.name)} (${formatSize(f.size)})</div></div>`;
       }
       if (media === 'video') {
         return `<div class="file-media"><video class="file-embed-video" src="${escapeHtml(f.url)}" controls preload="metadata"></video><div class="file-media-name">${escapeHtml(f.name)} (${formatSize(f.size)})</div></div>`;
@@ -1254,7 +1250,7 @@ async function openDetail(submissionId, opts = {}) {
       html += `<div class="detail-content detail-text-content">${escapeHtml(data.content)}</div>`;
     }
 
-    html += renderFileLinksHtml(data.files, { submissionId, allowRotate: isCurrentBoardTeacher() });
+    html += renderFileLinksHtml(data.files);
     if (data.memo) html += `<div class="detail-memo">💬 ${escapeHtml(data.memo)}</div>`;
 
     // Comments section
@@ -1542,12 +1538,6 @@ document.getElementById('detail-modal').addEventListener('click', (e) => {
     return;
   }
 
-  const rotBtn = e.target.closest('.file-media-rotate');
-  if (rotBtn) {
-    e.stopPropagation();
-    rotateSubmissionImage(rotBtn.dataset.subId, Number(rotBtn.dataset.fileIdx), rotBtn);
-    return;
-  }
 });
 
 /** 제출된 이미지를 90° 회전하여 같은 Storage 경로에 덮어쓰고 URL을 갱신.
