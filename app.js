@@ -2385,12 +2385,14 @@ window.openCropModal = async function(submissionId, fileIdx) {
       img.onerror = () => rej(new Error('이미지 로드 실패'));
     });
 
-    const area = document.getElementById('crop-area');
+    // 모달을 먼저 보여줘야 layout 계산이 가능 (display:none이면 모든 측정값 0)
+    document.getElementById('crop-modal').style.display = 'flex';
+    openModalHistory();
+
+    // 다음 프레임에서 측정 (layout flush 보장)
+    await new Promise(r => requestAnimationFrame(r));
+
     const box = document.getElementById('crop-box');
-    // 영역 크기 = 표시된 이미지 크기
-    const rect = img.getBoundingClientRect();
-    const areaRect = area.getBoundingClientRect();
-    // img가 area 안에서 중앙 정렬되어 있을 수 있으므로 offsetLeft/Top 사용
     const imgLeft = img.offsetLeft;
     const imgTop = img.offsetTop;
     const dispW = img.clientWidth;
@@ -2407,9 +2409,6 @@ window.openCropModal = async function(submissionId, fileIdx) {
       imgLeft, imgTop, dispW, dispH,
       naturalW: img.naturalWidth, naturalH: img.naturalHeight,
     };
-
-    document.getElementById('crop-modal').style.display = 'flex';
-    openModalHistory();
   } catch (e) {
     console.error(e);
     toast('크롭 모달 열기 실패');
