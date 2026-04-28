@@ -1227,11 +1227,13 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 
 /* ── Star Button (과제 보드 반응) ── */
 .card-reactions { padding:8px 14px 0; display:flex; gap:6px; }
-.star-btn { background:none; border:1px solid var(--border); border-radius:16px; padding:3px 10px; cursor:pointer; font-size:.8rem; display:inline-flex; align-items:center; gap:4px; transition:all .15s; color:var(--gray-600); }
+.star-btn,
+.comment-btn { background:none; border:1px solid var(--border); border-radius:16px; padding:3px 10px; cursor:pointer; font-size:.8rem; display:inline-flex; align-items:center; gap:4px; transition:all .15s; color:var(--gray-600); font-family:inherit; }
 .star-btn:hover:not(:disabled) { border-color:#F59E0B; background:#fef3c7; color:#B45309; }
 .star-btn.starred { border-color:#F59E0B; background:#fef3c7; color:#B45309; font-weight:600; }
 .star-btn:disabled { opacity:.45; cursor:not-allowed; }
-.star-count { font-weight:600; }
+.comment-btn:hover { border-color:var(--primary); background:var(--primary-light); color:var(--primary); }
+.star-count, .card-comment-count { font-weight:600; }
 
 /* ── Gallery Sort Select ── */
 .gallery-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }

@@ -1139,7 +1139,6 @@ function renderGallery(docs) {
         <h3 class="card-title">${escapeHtml(data.title || '(제목 없음)')}</h3>
         ${preview}
         ${data.memo ? `<div class="card-memo">💬 ${escapeHtml(data.memo)}</div>` : ''}
-        <div class="card-comment-count" data-sub-id="${escapeHtml(d.id)}"></div>
         <div class="card-footer">
           <span class="card-author">${escapeHtml(data.name)}</span>
           <span class="card-time">${time}${updated}</span>
@@ -1147,6 +1146,9 @@ function renderGallery(docs) {
         <div class="card-reactions">
           <button class="star-btn ${starred ? 'starred' : ''}" data-id="${escapeHtml(d.id)}" title="${isMine ? '내 게시물' : (starred ? '별 취소' : '별 주기')}" ${isMine ? 'disabled' : ''}>
             ${starred ? '⭐' : '☆'} <span class="star-count">${stars.length}</span>
+          </button>
+          <button class="comment-btn" data-id="${escapeHtml(d.id)}" title="댓글">
+            💬 <span class="card-comment-count" data-sub-id="${escapeHtml(d.id)}">0</span>
           </button>
         </div>
         ${isMine && !isBoardClosed() ? `
@@ -1171,6 +1173,9 @@ document.getElementById('gallery-grid').addEventListener('click', (e) => {
 
   const starBtn = e.target.closest('.star-btn');
   if (starBtn && !starBtn.disabled) { e.stopPropagation(); toggleStar(currentBoardCode, starBtn.dataset.id); return; }
+
+  const commentBtn = e.target.closest('.comment-btn');
+  if (commentBtn) { e.stopPropagation(); openDetail(commentBtn.dataset.id, { focusComments: true }); return; }
 
   const card = e.target.closest('.gallery-card');
   if (card?.dataset.id) openDetail(card.dataset.id);
@@ -1200,7 +1205,7 @@ async function toggleStar(boardCode, submissionId) {
 }
 
 // ── Detail Modal ──
-async function openDetail(submissionId) {
+async function openDetail(submissionId, opts = {}) {
   try {
     // Use cached docs if available, otherwise fetch
     currentDetailIndex = galleryDocs.findIndex(d => d.id === submissionId);
@@ -1254,6 +1259,14 @@ async function openDetail(submissionId) {
     if (modal.style.display !== 'flex') {
       modal.style.display = 'flex';
       openModalHistory();
+    }
+
+    // 댓글 버튼으로 진입한 경우 댓글 영역으로 스크롤 + 입력란 포커스
+    if (opts.focusComments) {
+      setTimeout(() => {
+        document.querySelector('#detail-modal .detail-comments')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById('comment-input')?.focus();
+      }, 100);
     }
   } catch (e) {
     console.error(e);
@@ -1311,7 +1324,13 @@ async function loadCommentCounts(submissionIds) {
     try {
       const snap = await getCountFromServer(collection(db, 'boards', code, 'submissions', id, 'comments'));
       const count = snap.data().count;
-      el.innerHTML = count > 0 ? `<span class="card-comment-badge">💬 ${count}</span>` : '';
+      // 학생 카드(comment-btn 내부 span): 숫자만 표시
+      // 교사 카드(div): 0건은 비우고, 1건 이상은 배지
+      if (el.tagName === 'SPAN') {
+        el.textContent = count;
+      } else {
+        el.innerHTML = count > 0 ? `<span class="card-comment-badge">💬 ${count}</span>` : '';
+      }
     } catch (_) {}
   }));
 }
