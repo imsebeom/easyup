@@ -2396,15 +2396,11 @@ window.openCropModal = async function(submissionId, fileIdx) {
     const dispW = img.clientWidth;
     const dispH = img.clientHeight;
 
-    // 크롭 박스 초기 위치: 80%
-    const w = Math.round(dispW * 0.8);
-    const h = Math.round(dispH * 0.8);
-    const x = imgLeft + Math.round((dispW - w) / 2);
-    const y = imgTop + Math.round((dispH - h) / 2);
-    box.style.left = x + 'px';
-    box.style.top = y + 'px';
-    box.style.width = w + 'px';
-    box.style.height = h + 'px';
+    // 빈 박스로 시작 — 사용자가 드래그로 영역을 그림 (윈도우 캡처 스타일)
+    box.style.left = imgLeft + 'px';
+    box.style.top = imgTop + 'px';
+    box.style.width = '0px';
+    box.style.height = '0px';
 
     cropState = {
       submissionId, fileIdx, file,
@@ -2431,54 +2427,96 @@ window.closeCropModal = function() {
   if (!box) return;
   let drag = null;
 
+  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
   function start(e) {
     if (!cropState) return;
     const handle = e.target.closest('.crop-handle');
     const onBox = e.target === box;
-    if (!handle && !onBox) return;
     e.preventDefault();
     const pt = e.touches ? e.touches[0] : e;
+    const area = document.getElementById('crop-area');
+    const areaRect = area.getBoundingClientRect();
     const r = box.getBoundingClientRect();
-    drag = {
-      mode: handle ? handle.dataset.handle : 'move',
-      startX: pt.clientX, startY: pt.clientY,
-      startLeft: parseFloat(box.style.left) || 0,
-      startTop: parseFloat(box.style.top) || 0,
-      startW: r.width, startH: r.height,
-    };
+
+    if (handle) {
+      drag = {
+        mode: handle.dataset.handle,
+        startX: pt.clientX, startY: pt.clientY,
+        startLeft: parseFloat(box.style.left) || 0,
+        startTop: parseFloat(box.style.top) || 0,
+        startW: r.width, startH: r.height,
+      };
+    } else if (onBox) {
+      drag = {
+        mode: 'move',
+        startX: pt.clientX, startY: pt.clientY,
+        startLeft: parseFloat(box.style.left) || 0,
+        startTop: parseFloat(box.style.top) || 0,
+        startW: r.width, startH: r.height,
+      };
+    } else {
+      // 빈 영역에서 드래그 시작 → 새 사각형 그리기 (윈도우 캡처 스타일)
+      const { imgLeft, imgTop, dispW, dispH } = cropState;
+      const originX = clamp(pt.clientX - areaRect.left, imgLeft, imgLeft + dispW);
+      const originY = clamp(pt.clientY - areaRect.top, imgTop, imgTop + dispH);
+      drag = { mode: 'draw', originX, originY };
+      // 박스 초기화 (시작점에 점)
+      box.style.left = originX + 'px';
+      box.style.top = originY + 'px';
+      box.style.width = '1px';
+      box.style.height = '1px';
+    }
   }
 
   function move(e) {
     if (!drag || !cropState) return;
     e.preventDefault();
     const pt = e.touches ? e.touches[0] : e;
-    const dx = pt.clientX - drag.startX;
-    const dy = pt.clientY - drag.startY;
     const { imgLeft, imgTop, dispW, dispH } = cropState;
     const minSize = 30;
+
+    if (drag.mode === 'draw') {
+      const area = document.getElementById('crop-area');
+      const areaRect = area.getBoundingClientRect();
+      const cx = clamp(pt.clientX - areaRect.left, imgLeft, imgLeft + dispW);
+      const cy = clamp(pt.clientY - areaRect.top, imgTop, imgTop + dispH);
+      const l = Math.min(drag.originX, cx);
+      const t = Math.min(drag.originY, cy);
+      const w = Math.abs(cx - drag.originX);
+      const h = Math.abs(cy - drag.originY);
+      box.style.left = l + 'px';
+      box.style.top = t + 'px';
+      box.style.width = w + 'px';
+      box.style.height = h + 'px';
+      return;
+    }
+
+    const dx = pt.clientX - drag.startX;
+    const dy = pt.clientY - drag.startY;
     let l = drag.startLeft, t = drag.startTop, w = drag.startW, h = drag.startH;
 
     if (drag.mode === 'move') {
-      l = Math.max(imgLeft, Math.min(imgLeft + dispW - w, drag.startLeft + dx));
-      t = Math.max(imgTop, Math.min(imgTop + dispH - h, drag.startTop + dy));
+      l = clamp(drag.startLeft + dx, imgLeft, imgLeft + dispW - w);
+      t = clamp(drag.startTop + dy, imgTop, imgTop + dispH - h);
     } else {
       const right = drag.startLeft + drag.startW;
       const bottom = drag.startTop + drag.startH;
       if (drag.mode === 'tl') {
-        l = Math.max(imgLeft, Math.min(right - minSize, drag.startLeft + dx));
-        t = Math.max(imgTop, Math.min(bottom - minSize, drag.startTop + dy));
+        l = clamp(drag.startLeft + dx, imgLeft, right - minSize);
+        t = clamp(drag.startTop + dy, imgTop, bottom - minSize);
         w = right - l; h = bottom - t;
       } else if (drag.mode === 'tr') {
-        t = Math.max(imgTop, Math.min(bottom - minSize, drag.startTop + dy));
-        w = Math.max(minSize, Math.min(imgLeft + dispW - drag.startLeft, drag.startW + dx));
+        t = clamp(drag.startTop + dy, imgTop, bottom - minSize);
+        w = clamp(drag.startW + dx, minSize, imgLeft + dispW - drag.startLeft);
         h = bottom - t;
       } else if (drag.mode === 'bl') {
-        l = Math.max(imgLeft, Math.min(right - minSize, drag.startLeft + dx));
+        l = clamp(drag.startLeft + dx, imgLeft, right - minSize);
         w = right - l;
-        h = Math.max(minSize, Math.min(imgTop + dispH - drag.startTop, drag.startH + dy));
+        h = clamp(drag.startH + dy, minSize, imgTop + dispH - drag.startTop);
       } else if (drag.mode === 'br') {
-        w = Math.max(minSize, Math.min(imgLeft + dispW - drag.startLeft, drag.startW + dx));
-        h = Math.max(minSize, Math.min(imgTop + dispH - drag.startTop, drag.startH + dy));
+        w = clamp(drag.startW + dx, minSize, imgLeft + dispW - drag.startLeft);
+        h = clamp(drag.startH + dy, minSize, imgTop + dispH - drag.startTop);
       }
     }
     box.style.left = l + 'px';
@@ -2487,7 +2525,18 @@ window.closeCropModal = function() {
     box.style.height = h + 'px';
   }
 
-  function end() { drag = null; }
+  function end() {
+    if (drag?.mode === 'draw') {
+      // 너무 작은 사각형은 폐기 (실수 클릭)
+      const w = parseFloat(box.style.width);
+      const h = parseFloat(box.style.height);
+      if (w < 10 || h < 10) {
+        box.style.width = '0px';
+        box.style.height = '0px';
+      }
+    }
+    drag = null;
+  }
 
   document.getElementById('crop-area')?.addEventListener('mousedown', start);
   document.addEventListener('mousemove', move);
@@ -2506,10 +2555,17 @@ window.applyCrop = async function() {
 
     const box = document.getElementById('crop-box');
     const { imgLeft, imgTop, dispW, dispH, naturalW, naturalH, file, submissionId, fileIdx } = cropState;
+    const boxW = parseFloat(box.style.width);
+    const boxH = parseFloat(box.style.height);
+    if (!boxW || !boxH || boxW < 10 || boxH < 10) {
+      toast('자를 영역을 드래그로 그려주세요');
+      btn.disabled = false; btn.textContent = prev;
+      return;
+    }
     const bx = (parseFloat(box.style.left) - imgLeft) / dispW;
     const by = (parseFloat(box.style.top) - imgTop) / dispH;
-    const bw = parseFloat(box.style.width) / dispW;
-    const bh = parseFloat(box.style.height) / dispH;
+    const bw = boxW / dispW;
+    const bh = boxH / dispH;
 
     // 원본 이미지 다운로드
     const resp = await fetch(file.url);
