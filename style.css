@@ -185,8 +185,8 @@ body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',
 .file-media-name { font-size:.8rem; color:var(--text-light); margin-top:4px; }
 
 /* Card thumbnail (gallery) */
-.card-thumbnail { margin:-16px -16px 8px; border-radius:var(--radius) var(--radius) 0 0; overflow:hidden; max-height:144px; position:relative; }
-.card-thumbnail img, .card-thumbnail video { width:100%; height:144px; object-fit:cover; display:block; }
+.card-thumbnail { margin:-16px -16px 8px; border-radius:var(--radius) var(--radius) 0 0; overflow:hidden; max-height:200px; position:relative; background:#f3f4f6; }
+.card-thumbnail img, .card-thumbnail video { width:100%; max-height:200px; object-fit:contain; display:block; }
 .card-thumbnail-badge { position:absolute; bottom:6px; left:6px; background:rgba(0,0,0,.6); color:#fff; font-size:.7rem; padding:2px 8px; border-radius:10px; }
 
 /* Detail modal navigation */
@@ -672,8 +672,12 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
 .file-item { display:flex; align-items:center; gap:10px; padding:6px 10px; background:var(--bg); border-radius:6px; font-size:.85rem; }
 .file-item .file-item-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .file-item .file-item-name small { color:var(--text-light); }
-.file-preview-thumb { width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--border); flex-shrink:0; cursor:pointer; }
-.file-preview-icon { width:64px; height:64px; display:flex; align-items:center; justify-content:center; font-size:1.6rem; background:#fff; border:1px solid var(--border); border-radius:6px; flex-shrink:0; }
+.file-preview-wrap { position:relative; flex-shrink:0; width:80px; height:80px; }
+.file-preview-thumb { width:80px; height:80px; object-fit:contain; background:#fff; border-radius:6px; border:1px solid var(--border); cursor:pointer; transition:transform .2s; display:block; }
+.file-preview-icon { width:80px; height:80px; display:flex; align-items:center; justify-content:center; font-size:1.6rem; background:#fff; border:1px solid var(--border); border-radius:6px; flex-shrink:0; }
+.file-rotate-btn { position:absolute; top:2px; right:2px; width:24px; height:24px; padding:0; border:none; border-radius:50%; background:rgba(0,0,0,.6); color:#fff; font-size:.75rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .15s; }
+.file-rotate-btn:hover { background:rgba(0,0,0,.85); }
+.rot-badge { display:inline-block; margin-left:6px; padding:1px 6px; background:#fef3c7; color:#92400e; border-radius:8px; font-size:.7rem; font-weight:600; }
 .file-item button { background:none; border:none; color:var(--danger); cursor:pointer; font-size:1rem; flex-shrink:0; }
 .file-edit-notice { padding:8px 12px; background:#fef3c7; border-radius:6px; font-size:.85rem; color:#92400e; }
 
@@ -1291,7 +1295,7 @@ input:focus, textarea:focus { outline:none; border-color:var(--primary); }
   .detail-nav { width:32px; height:32px; font-size:1.2rem; }
   .comment-input-area { flex-direction:column; }
   .comment-input-area .btn { align-self:flex-end; }
-  .card-thumbnail img, .card-thumbnail video { height:112px; }
+  .card-thumbnail, .card-thumbnail img, .card-thumbnail video { max-height:160px; }
   .cl-search-box { margin-left:0; width:100%; }
   .cl-search-box input { width:100%; }
   .cl-folder-grid { grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:8px; }

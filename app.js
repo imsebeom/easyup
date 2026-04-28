@@ -1132,12 +1132,15 @@ function renderGallery(docs) {
     const stars = data.stars || [];
     const starred = stars.includes(deviceId);
     // Use data-id attribute instead of inline onclick with string interpolation (XSS safe)
+    // 미디어 썸네일은 카드 최상단(edge-to-edge)으로 분리, 텍스트/URL 프리뷰는 제목 아래에 유지
+    const isMediaPreview = data.files?.length && data.type !== 'url' && data.type !== 'text';
     return `
       <div class="gallery-card ${isMine ? 'gallery-card-mine' : ''}" data-id="${escapeHtml(d.id)}">
         ${isMine ? '<div class="mine-badge">내 제출</div>' : ''}
+        ${isMediaPreview ? preview : ''}
         <div class="card-type-icon">${cfg.icon || ''}</div>
         <h3 class="card-title">${escapeHtml(data.title || '(제목 없음)')}</h3>
-        ${preview}
+        ${!isMediaPreview ? preview : ''}
         ${data.memo ? `<div class="card-memo">💬 ${escapeHtml(data.memo)}</div>` : ''}
         <div class="card-footer">
           <span class="card-author">${escapeHtml(data.name)}</span>
@@ -2156,6 +2159,7 @@ function resetSubmitForm() {
   existingFiles = null;
   teacherEditMode = false;
   selectedFiles = [];
+  fileRotations = [];
   // 미리보기 URL 메모리 해제
   document.querySelectorAll('#file-list img[data-preview-url]').forEach(img => {
     try { URL.revokeObjectURL(img.dataset.previewUrl); } catch (_) {}
@@ -2225,10 +2229,16 @@ dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classLis
 function addFiles(fileList) {
   for (const f of fileList) {
     if (f.size > 1024 * 1024 * 1024) { toast(`${f.name}은 1GB를 초과합니다`); continue; }
-    if (!selectedFiles.find(sf => sf.name === f.name && sf.size === f.size)) selectedFiles.push(f);
+    if (!selectedFiles.find(sf => sf.name === f.name && sf.size === f.size)) {
+      selectedFiles.push(f);
+      fileRotations.push(0);
+    }
   }
   renderFileList();
 }
+
+// 파일별 회전 각도 (이미지 한정)
+let fileRotations = [];
 
 function renderFileList() {
   // 이전 미리보기 URL 정리 (메모리 누수 방지)
@@ -2237,17 +2247,22 @@ function renderFileList() {
   });
   document.getElementById('file-list').innerHTML = selectedFiles.map((f, i) => {
     const isImage = getMediaType(f.name) === 'image';
+    const rot = fileRotations[i] || 0;
     let preview;
     if (isImage) {
       const url = URL.createObjectURL(f);
-      preview = `<img class="file-preview-thumb" src="${url}" data-preview-url="${url}" alt="">`;
+      preview = `
+        <div class="file-preview-wrap">
+          <img class="file-preview-thumb" src="${url}" data-preview-url="${url}" alt="" style="transform:rotate(${rot}deg)">
+          <button class="file-rotate-btn" data-idx="${i}" title="90° 회전">🔄</button>
+        </div>`;
     } else {
       preview = '<span class="file-preview-icon">📄</span>';
     }
     return `
       <div class="file-item">
         ${preview}
-        <span class="file-item-name">${escapeHtml(f.name)} <small>(${formatSize(f.size)})</small></span>
+        <span class="file-item-name">${escapeHtml(f.name)} <small>(${formatSize(f.size)})</small>${isImage && rot ? ` <span class="rot-badge">회전 ${rot}°</span>` : ''}</span>
         <button data-idx="${i}" class="file-remove-btn">✕</button>
       </div>
     `;
@@ -2255,12 +2270,55 @@ function renderFileList() {
 }
 
 document.getElementById('file-list').addEventListener('click', (e) => {
+  const rotBtn = e.target.closest('.file-rotate-btn');
+  if (rotBtn) {
+    e.stopPropagation();
+    const idx = Number(rotBtn.dataset.idx);
+    fileRotations[idx] = ((fileRotations[idx] || 0) + 90) % 360;
+    renderFileList();
+    return;
+  }
   const btn = e.target.closest('.file-remove-btn');
   if (!btn) return;
-  selectedFiles.splice(Number(btn.dataset.idx), 1);
+  const idx = Number(btn.dataset.idx);
+  selectedFiles.splice(idx, 1);
+  fileRotations.splice(idx, 1);
   document.getElementById('submit-file').value = '';
   renderFileList();
 });
+
+/**
+ * 이미지 파일을 주어진 각도(0/90/180/270)만큼 회전한 새 File로 반환.
+ * EXIF 무시하고 픽셀 단위로 다시 그림.
+ */
+async function rotateImageFile(file, deg) {
+  if (!deg) return file;
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = reject;
+      im.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    const swap = deg === 90 || deg === 270;
+    canvas.width = swap ? img.naturalHeight : img.naturalWidth;
+    canvas.height = swap ? img.naturalWidth : img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((deg * Math.PI) / 180);
+    ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    const quality = mime === 'image/jpeg' ? 0.92 : undefined;
+    const blob = await new Promise((res) => canvas.toBlob(res, mime, quality));
+    if (!blob) return file;
+    return new File([blob], file.name, { type: blob.type, lastModified: Date.now() });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 // ── Submit ──
 window.submitAssignment = async function() {
@@ -2291,10 +2349,15 @@ window.submitAssignment = async function() {
   try {
     if (type === 'file' && selectedFiles.length > 0) {
       progressBar.style.display = 'block';
-      const totalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
+      // 회전된 이미지가 있으면 canvas로 재인코딩
+      const filesToUpload = await Promise.all(selectedFiles.map((f, i) => {
+        const rot = fileRotations[i] || 0;
+        return rot && getMediaType(f.name) === 'image' ? rotateImageFile(f, rot) : Promise.resolve(f);
+      }));
+      const totalSize = filesToUpload.reduce((sum, f) => sum + f.size, 0);
       let uploadedSize = 0;
 
-      for (const file of selectedFiles) {
+      for (const file of filesToUpload) {
         const filePath = `boards/${currentBoardCode}/${Date.now()}_${file.name}`;
         const storageRef = ref(storage, filePath);
         const uploadTask = uploadBytesResumable(storageRef, file);
@@ -4213,11 +4276,13 @@ function renderSubmissions(docs) {
       preview = renderFileThumbnailHtml(data.files);
     }
 
+    const isMediaPreview = data.files?.length && data.type !== 'url' && data.type !== 'text';
     return `
       <div class="gallery-card" data-id="${escapeHtml(d.id)}" draggable="true">
+        ${isMediaPreview ? preview : ''}
         <div class="card-type-icon">${cfg.icon || ''}</div>
         <h3 class="card-title">${escapeHtml(data.title || '(제목 없음)')}</h3>
-        ${preview}
+        ${!isMediaPreview ? preview : ''}
         ${data.memo ? `<div class="card-memo">💬 ${escapeHtml(data.memo)}</div>` : ''}
         <div class="card-comment-count" data-sub-id="${escapeHtml(d.id)}"></div>
         <div class="card-footer">
