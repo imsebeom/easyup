@@ -1163,6 +1163,7 @@ function renderGallery(docs) {
         </div>
         ${isMine && !isBoardClosed() ? `
           <div class="card-actions">
+            ${canRotate ? `<button class="btn-icon btn-crop" data-id="${escapeHtml(d.id)}" data-file-idx="${firstImageIdx}" title="이미지 자르기">✂️</button>` : ''}
             ${canRotate ? `<button class="btn-icon btn-rotate" data-id="${escapeHtml(d.id)}" data-file-idx="${firstImageIdx}" title="이미지 90° 회전">🔄</button>` : ''}
             <button class="btn-icon btn-edit" data-id="${escapeHtml(d.id)}" title="수정">✏️</button>
             <button class="btn-icon btn-icon-danger btn-del" data-id="${escapeHtml(d.id)}" title="삭제">🗑</button>
@@ -1184,6 +1185,9 @@ document.getElementById('gallery-grid').addEventListener('click', (e) => {
 
   const rotBtn = e.target.closest('.btn-rotate');
   if (rotBtn) { e.stopPropagation(); rotateSubmissionImage(rotBtn.dataset.id, Number(rotBtn.dataset.fileIdx), rotBtn, { fromCard: true }); return; }
+
+  const cropBtn = e.target.closest('.btn-crop');
+  if (cropBtn) { e.stopPropagation(); openCropModal(cropBtn.dataset.id, Number(cropBtn.dataset.fileIdx)); return; }
 
   const starBtn = e.target.closest('.star-btn');
   if (starBtn && !starBtn.disabled) { e.stopPropagation(); toggleStar(currentBoardCode, starBtn.dataset.id); return; }
@@ -2355,6 +2359,204 @@ document.getElementById('file-list').addEventListener('click', (e) => {
   document.getElementById('submit-file').value = '';
   renderFileList();
 });
+
+// ══════════════════════════════════════
+//  이미지 크롭 모달 (학생/교사 공용)
+// ══════════════════════════════════════
+let cropState = null;
+
+window.openCropModal = async function(submissionId, fileIdx) {
+  try {
+    const subRef = doc(db, 'boards', currentBoardCode, 'submissions', submissionId);
+    const subDoc = await getDoc(subRef);
+    if (!subDoc.exists()) { toast('제출물 없음'); return; }
+    const data = subDoc.data();
+    const teacher = isCurrentBoardTeacher();
+    const isOwner = data.deviceId === deviceId;
+    if (!teacher && !isOwner) { toast('권한이 없습니다'); return; }
+    if (!teacher && isBoardClosed()) { toast('마감된 보드입니다'); return; }
+    const file = data.files?.[fileIdx];
+    if (!file?.path || getMediaType(file.name) !== 'image') { toast('이미지 파일만 자를 수 있습니다'); return; }
+
+    const img = document.getElementById('crop-image');
+    img.src = file.url;
+    await new Promise((res, rej) => {
+      img.onload = res;
+      img.onerror = () => rej(new Error('이미지 로드 실패'));
+    });
+
+    const area = document.getElementById('crop-area');
+    const box = document.getElementById('crop-box');
+    // 영역 크기 = 표시된 이미지 크기
+    const rect = img.getBoundingClientRect();
+    const areaRect = area.getBoundingClientRect();
+    // img가 area 안에서 중앙 정렬되어 있을 수 있으므로 offsetLeft/Top 사용
+    const imgLeft = img.offsetLeft;
+    const imgTop = img.offsetTop;
+    const dispW = img.clientWidth;
+    const dispH = img.clientHeight;
+
+    // 크롭 박스 초기 위치: 80%
+    const w = Math.round(dispW * 0.8);
+    const h = Math.round(dispH * 0.8);
+    const x = imgLeft + Math.round((dispW - w) / 2);
+    const y = imgTop + Math.round((dispH - h) / 2);
+    box.style.left = x + 'px';
+    box.style.top = y + 'px';
+    box.style.width = w + 'px';
+    box.style.height = h + 'px';
+
+    cropState = {
+      submissionId, fileIdx, file,
+      imgLeft, imgTop, dispW, dispH,
+      naturalW: img.naturalWidth, naturalH: img.naturalHeight,
+    };
+
+    document.getElementById('crop-modal').style.display = 'flex';
+    openModalHistory();
+  } catch (e) {
+    console.error(e);
+    toast('크롭 모달 열기 실패');
+  }
+};
+
+window.closeCropModal = function() {
+  document.getElementById('crop-modal').style.display = 'none';
+  cropState = null;
+};
+
+// 크롭 박스 드래그/리사이즈 (마우스 + 터치)
+(function initCropDrag() {
+  const box = document.getElementById('crop-box');
+  if (!box) return;
+  let drag = null;
+
+  function start(e) {
+    if (!cropState) return;
+    const handle = e.target.closest('.crop-handle');
+    const onBox = e.target === box;
+    if (!handle && !onBox) return;
+    e.preventDefault();
+    const pt = e.touches ? e.touches[0] : e;
+    const r = box.getBoundingClientRect();
+    drag = {
+      mode: handle ? handle.dataset.handle : 'move',
+      startX: pt.clientX, startY: pt.clientY,
+      startLeft: parseFloat(box.style.left) || 0,
+      startTop: parseFloat(box.style.top) || 0,
+      startW: r.width, startH: r.height,
+    };
+  }
+
+  function move(e) {
+    if (!drag || !cropState) return;
+    e.preventDefault();
+    const pt = e.touches ? e.touches[0] : e;
+    const dx = pt.clientX - drag.startX;
+    const dy = pt.clientY - drag.startY;
+    const { imgLeft, imgTop, dispW, dispH } = cropState;
+    const minSize = 30;
+    let l = drag.startLeft, t = drag.startTop, w = drag.startW, h = drag.startH;
+
+    if (drag.mode === 'move') {
+      l = Math.max(imgLeft, Math.min(imgLeft + dispW - w, drag.startLeft + dx));
+      t = Math.max(imgTop, Math.min(imgTop + dispH - h, drag.startTop + dy));
+    } else {
+      const right = drag.startLeft + drag.startW;
+      const bottom = drag.startTop + drag.startH;
+      if (drag.mode === 'tl') {
+        l = Math.max(imgLeft, Math.min(right - minSize, drag.startLeft + dx));
+        t = Math.max(imgTop, Math.min(bottom - minSize, drag.startTop + dy));
+        w = right - l; h = bottom - t;
+      } else if (drag.mode === 'tr') {
+        t = Math.max(imgTop, Math.min(bottom - minSize, drag.startTop + dy));
+        w = Math.max(minSize, Math.min(imgLeft + dispW - drag.startLeft, drag.startW + dx));
+        h = bottom - t;
+      } else if (drag.mode === 'bl') {
+        l = Math.max(imgLeft, Math.min(right - minSize, drag.startLeft + dx));
+        w = right - l;
+        h = Math.max(minSize, Math.min(imgTop + dispH - drag.startTop, drag.startH + dy));
+      } else if (drag.mode === 'br') {
+        w = Math.max(minSize, Math.min(imgLeft + dispW - drag.startLeft, drag.startW + dx));
+        h = Math.max(minSize, Math.min(imgTop + dispH - drag.startTop, drag.startH + dy));
+      }
+    }
+    box.style.left = l + 'px';
+    box.style.top = t + 'px';
+    box.style.width = w + 'px';
+    box.style.height = h + 'px';
+  }
+
+  function end() { drag = null; }
+
+  document.getElementById('crop-area')?.addEventListener('mousedown', start);
+  document.addEventListener('mousemove', move);
+  document.addEventListener('mouseup', end);
+  document.getElementById('crop-area')?.addEventListener('touchstart', start, { passive: false });
+  document.addEventListener('touchmove', move, { passive: false });
+  document.addEventListener('touchend', end);
+})();
+
+window.applyCrop = async function() {
+  if (!cropState) return;
+  const btn = document.getElementById('crop-apply-btn');
+  const prev = btn.textContent;
+  try {
+    btn.disabled = true; btn.textContent = '⏳ 처리 중...';
+
+    const box = document.getElementById('crop-box');
+    const { imgLeft, imgTop, dispW, dispH, naturalW, naturalH, file, submissionId, fileIdx } = cropState;
+    const bx = (parseFloat(box.style.left) - imgLeft) / dispW;
+    const by = (parseFloat(box.style.top) - imgTop) / dispH;
+    const bw = parseFloat(box.style.width) / dispW;
+    const bh = parseFloat(box.style.height) / dispH;
+
+    // 원본 이미지 다운로드
+    const resp = await fetch(file.url);
+    const blob = await resp.blob();
+    const img = new Image();
+    img.src = URL.createObjectURL(blob);
+    await new Promise((r, j) => { img.onload = r; img.onerror = j; });
+
+    const sx = Math.round(bx * naturalW);
+    const sy = Math.round(by * naturalH);
+    const sw = Math.max(1, Math.round(bw * naturalW));
+    const sh = Math.max(1, Math.round(bh * naturalH));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sw; canvas.height = sh;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    URL.revokeObjectURL(img.src);
+
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    const quality = mime === 'image/jpeg' ? 0.92 : undefined;
+    const outBlob = await new Promise(res => canvas.toBlob(res, mime, quality));
+    if (!outBlob) throw new Error('인코딩 실패');
+
+    // Storage 덮어쓰기
+    const storageRef = ref(storage, file.path);
+    await uploadBytesResumable(storageRef, outBlob);
+    const newUrl = await getDownloadURL(storageRef);
+
+    // Firestore 갱신
+    const subRef = doc(db, 'boards', currentBoardCode, 'submissions', submissionId);
+    const subDoc = await getDoc(subRef);
+    const data = subDoc.data();
+    const newFiles = (data.files || []).map((f, i) => i === fileIdx
+      ? { ...f, url: newUrl, size: outBlob.size }
+      : f);
+    await updateDoc(subRef, { files: newFiles });
+
+    closeCropModal();
+    toast('자르기 완료');
+  } catch (e) {
+    console.error('crop failed', e);
+    toast('자르기 실패: ' + (e.message || e));
+    btn.disabled = false; btn.textContent = prev;
+  }
+};
 
 /**
  * 이미지 파일을 주어진 각도(0/90/180/270)만큼 회전한 새 File로 반환.
@@ -4346,6 +4548,8 @@ function renderSubmissions(docs) {
     }
 
     const isMediaPreview = data.files?.length && data.type !== 'url' && data.type !== 'text';
+    const firstImageIdx = (data.files || []).findIndex(f => f.path && getMediaType(f.name) === 'image');
+    const hasImage = firstImageIdx >= 0;
     return `
       <div class="gallery-card" data-id="${escapeHtml(d.id)}" draggable="true">
         ${isMediaPreview ? preview : ''}
@@ -4359,6 +4563,8 @@ function renderSubmissions(docs) {
           <span class="card-time">${time}${updated}</span>
         </div>
         <div class="card-actions">
+          ${hasImage ? `<button class="btn-icon btn-crop-sub" data-id="${escapeHtml(d.id)}" data-file-idx="${firstImageIdx}" title="이미지 자르기">✂️</button>` : ''}
+          ${hasImage ? `<button class="btn-icon btn-rotate-sub" data-id="${escapeHtml(d.id)}" data-file-idx="${firstImageIdx}" title="이미지 90° 회전">🔄</button>` : ''}
           <button class="btn-icon btn-edit-sub" data-id="${escapeHtml(d.id)}" title="수정">✏️</button>
           <button class="btn-icon btn-icon-danger btn-del-sub" data-id="${escapeHtml(d.id)}" title="삭제">🗑</button>
         </div>
@@ -4375,6 +4581,12 @@ submissionsList.addEventListener('click', (e) => {
 
   const btn = e.target.closest('.btn-del-sub');
   if (btn) { e.stopPropagation(); removeSubmission(btn.dataset.id); return; }
+
+  const rotBtn = e.target.closest('.btn-rotate-sub');
+  if (rotBtn) { e.stopPropagation(); rotateSubmissionImage(rotBtn.dataset.id, Number(rotBtn.dataset.fileIdx), rotBtn, { fromCard: true }); return; }
+
+  const cropBtn = e.target.closest('.btn-crop-sub');
+  if (cropBtn) { e.stopPropagation(); openCropModal(cropBtn.dataset.id, Number(cropBtn.dataset.fileIdx)); return; }
 
   const card = e.target.closest('.gallery-card');
   if (card?.dataset.id) openDetail(card.dataset.id);

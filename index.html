@@ -428,6 +428,33 @@
       </div>
     </div>
 
+    <!-- 이미지 크롭 모달 -->
+    <div id="crop-modal" class="modal" style="display:none">
+      <div class="modal-overlay" onclick="closeCropModal()"></div>
+      <div class="modal-content crop-modal-content">
+        <div class="modal-header">
+          <h2>이미지 자르기</h2>
+          <button class="modal-close" onclick="closeCropModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="crop-area" class="crop-area">
+            <img id="crop-image" alt="">
+            <div id="crop-box" class="crop-box">
+              <div class="crop-handle crop-handle-tl" data-handle="tl"></div>
+              <div class="crop-handle crop-handle-tr" data-handle="tr"></div>
+              <div class="crop-handle crop-handle-bl" data-handle="bl"></div>
+              <div class="crop-handle crop-handle-br" data-handle="br"></div>
+            </div>
+          </div>
+          <p class="crop-hint">모서리를 끌어 영역을 조절하고, 박스 가운데를 끌어 이동하세요.</p>
+        </div>
+        <div class="modal-footer crop-modal-footer">
+          <button class="btn btn-secondary" onclick="closeCropModal()">취소</button>
+          <button class="btn btn-primary" id="crop-apply-btn" onclick="applyCrop()">자르기</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 학생: 제출물 상세 모달 -->
     <div id="detail-modal" class="modal" style="display:none">
       <div class="modal-overlay" onclick="closeDetailModal()"></div>
