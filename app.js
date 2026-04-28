@@ -1275,12 +1275,11 @@ async function openDetail(submissionId, opts = {}) {
       openModalHistory();
     }
 
-    // 댓글 버튼으로 진입한 경우 댓글 영역으로 스크롤 + 입력란 포커스
+    // 댓글 버튼으로 진입한 경우 입력란 포커스 (브라우저가 자동으로 스크롤)
     if (opts.focusComments) {
       setTimeout(() => {
-        document.querySelector('#detail-modal .detail-comments')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        document.getElementById('comment-input')?.focus();
-      }, 100);
+        document.getElementById('comment-input')?.focus({ preventScroll: false });
+      }, 120);
     }
   } catch (e) {
     console.error(e);
@@ -1355,6 +1354,7 @@ function isCurrentBoardTeacher() {
 
 function setupCommentsListener(submissionId) {
   cleanupComments();
+  let isInitial = true; // 첫 스냅샷에서만 강제 스크롤
   const commentsRef = collection(db, 'boards', currentBoardCode, 'submissions', submissionId, 'comments');
   const q = query(commentsRef, orderBy('createdAt', 'asc'));
   unsubscribeComments = onSnapshot(q, (snapshot) => {
@@ -1365,8 +1365,11 @@ function setupCommentsListener(submissionId) {
     countEl.textContent = activeDocs.length > 0 ? `(${activeDocs.length})` : '';
     if (snapshot.docs.length === 0) {
       list.innerHTML = '<div class="comments-empty">아직 댓글이 없습니다</div>';
+      isInitial = false;
       return;
     }
+    // 사용자가 직접 스크롤하여 위쪽 댓글을 읽고 있는지 판별 (24px 여유)
+    const wasAtBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 24;
     const teacher = isCurrentBoardTeacher();
     list.innerHTML = snapshot.docs.map(d => {
       const c = d.data();
@@ -1407,7 +1410,9 @@ function setupCommentsListener(submissionId) {
         ${historyHtml}
       </div>`;
     }).join('');
-    list.scrollTop = list.scrollHeight;
+    // 첫 로드이거나 이미 맨 아래에 있던 경우에만 자동 스크롤 (위쪽 읽고 있는 사용자 방해 방지)
+    if (isInitial || wasAtBottom) list.scrollTop = list.scrollHeight;
+    isInitial = false;
   });
 }
 
