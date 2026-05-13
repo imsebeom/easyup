@@ -1264,7 +1264,9 @@ async function openDetail(submissionId, opts = {}) {
       </div>
     </div>`;
 
-    document.getElementById('detail-body').innerHTML = html;
+    const detailBody = document.getElementById('detail-body');
+    pauseMedia(detailBody);
+    detailBody.innerHTML = html;
 
     // Setup comments real-time listener
     setupCommentsListener(submissionId);
@@ -7601,13 +7603,21 @@ function openModalHistory() {
   history.pushState({ modal: true }, '');
 }
 
+/** Pause/stop any <video>/<audio> inside the given root element. */
+function pauseMedia(rootEl) {
+  if (!rootEl) return;
+  rootEl.querySelectorAll('video, audio').forEach(el => {
+    try { el.pause(); } catch (_) {}
+  });
+}
+
 /** Close a specific modal (or all). Handles history sync. */
 window.closeModal = function(modalId) {
   const ids = modalId ? [modalId] : MODAL_IDS;
   let closed = false;
   ids.forEach(id => {
     const el = document.getElementById(id);
-    if (el.style.display === 'flex') { el.style.display = 'none'; closed = true; }
+    if (el.style.display === 'flex') { pauseMedia(el); el.style.display = 'none'; closed = true; }
   });
   if (!closed) return;
   existingFiles = null;
@@ -7631,7 +7641,11 @@ window.addEventListener('popstate', () => {
   }
   // If a modal is still open (user pressed browser back), just hide it
   if (isAnyModalOpen()) {
-    MODAL_IDS.forEach(id => { document.getElementById(id).style.display = 'none'; });
+    MODAL_IDS.forEach(id => {
+      const el = document.getElementById(id);
+      pauseMedia(el);
+      el.style.display = 'none';
+    });
     existingFiles = null;
     teacherEditMode = false;
     cleanupComments();
