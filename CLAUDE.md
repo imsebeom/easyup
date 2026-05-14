@@ -383,4 +383,8 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
 - [x] 분류하기 학생 뷰 UX 개선 (2026-04-21)
   - 접속 화면(`name-view`) 입력 순서를 "모둠 선택 → 이름" 순으로 교체 (팀 모드에서 맥락상 모둠이 먼저)
   - `clShowMoveDialog`에 `CL.workspaceId` 필터 추가 — 카드 이동 모달에 다른 모둠/개인 워크스페이스의 분류기준이 섞여 나오던 버그 수정
+- [x] 클래스 슬롯 카드 수정 기능 (2026-05-14)
+  - 주간 그리드/테이블 양쪽 ✏️ 버튼 추가 → `editSlot(slotId)` 호출
+  - `edit-slot-modal`: 표시 제목 공통, 외부 URL 슬롯은 URL 필드 추가, 보드 슬롯은 연결된 보드 코드 미리보기 + 안내문
+  - `confirmEditSlot()`: 제목·URL만 patch (`sanitizeUrl` 적용), boardCode/요일/주차 등 메타데이터는 보존
 - [ ] 모바일 반응형 테스트

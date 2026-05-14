@@ -2947,6 +2947,7 @@ function renderWeekGrid(container, weekStart, allSlots, isTeacher) {
             const openBtn = s.externalUrl
               ? `<button class="btn btn-sm btn-secondary" onclick="window.open('${escapeHtml(s.externalUrl)}','_blank')">열기</button>`
               : `<button class="btn btn-sm btn-secondary" onclick="location.hash='board/${s.boardCode}'">열기</button>`;
+            const editBtn = `<button class="btn btn-sm btn-secondary" onclick="editSlot('${s.id}')" title="카드 수정">✏️</button>`;
             const hideBtn = `<button class="btn btn-sm btn-secondary" onclick="toggleSlotHidden('${s.id}')" title="${s.hidden ? '학생에게 보이기' : '학생에게 숨기기'}">${s.hidden ? '🚫' : '👁'}</button>`;
             return `<div class="class-slot-card${s.hidden ? ' is-hidden' : ''}" data-type="${s.type || ''}" data-slot-id="${escapeHtml(s.id)}" draggable="true">
             ${s.hidden ? '<div class="class-slot-hidden-badge">학생에게 숨김</div>' : ''}
@@ -2954,6 +2955,7 @@ function renderWeekGrid(container, weekStart, allSlots, isTeacher) {
             <div class="class-slot-title">${title}</div>
             <div class="class-slot-actions">
               ${openBtn}
+              ${editBtn}
               ${hideBtn}
               <button class="btn btn-sm btn-danger" onclick="removeClassSlot('${s.id}')">✕</button>
             </div>
@@ -3088,8 +3090,9 @@ function renderClassTable() {
             const link = s.externalUrl
               ? `<a href="${escapeHtml(s.externalUrl)}" target="_blank" rel="noopener" class="class-table-slot-title">${title}</a>`
               : `<a href="#board/${s.boardCode}" class="class-table-slot-title">${title}</a>`;
+            const editBtn = `<button class="btn-table-hide" onclick="editSlot('${s.id}')" title="카드 수정">✏️</button>`;
             const hideBtn = `<button class="btn-table-hide" onclick="toggleSlotHidden('${s.id}')" title="${s.hidden ? '학생에게 보이기' : '학생에게 숨기기'}">${s.hidden ? '🚫' : '👁'}</button>`;
-            return `<div class="class-table-slot${s.hidden ? ' is-hidden' : ''}"><span>${icon}</span>${link}${hideBtn}<button class="btn-table-del" onclick="removeClassSlot('${s.id}')" title="제거">✕</button></div>`;
+            return `<div class="class-table-slot${s.hidden ? ' is-hidden' : ''}"><span>${icon}</span>${link}${editBtn}${hideBtn}<button class="btn-table-del" onclick="removeClassSlot('${s.id}')" title="제거">✕</button></div>`;
           }).join('')
         : '<span class="class-table-empty">-</span>';
       return `<td class="${isToday ? 'class-table-today' : ''}">${slotsHtml}</td>`;
@@ -3344,6 +3347,55 @@ window.toggleSlotHidden = async function(slotId) {
     await updateDoc(doc(db, 'classes', currentClassAlias, 'slots', slotId), { hidden: next });
     toast(next ? '학생에게 숨김' : '학생에게 보임');
   } catch (e) { console.error(e); toast('실패'); }
+};
+
+let editingSlotId = null;
+window.editSlot = function(slotId) {
+  if (!currentClassAlias) return;
+  const slot = currentClassSlots.find(s => s.id === slotId);
+  if (!slot) { toast('카드를 찾을 수 없습니다'); return; }
+  editingSlotId = slotId;
+  document.getElementById('edit-slot-title').value = slot.title || '';
+  const urlGroup = document.getElementById('edit-slot-url-group');
+  const boardInfo = document.getElementById('edit-slot-board-info');
+  if (slot.externalUrl) {
+    urlGroup.style.display = '';
+    boardInfo.style.display = 'none';
+    document.getElementById('edit-slot-url').value = slot.externalUrl;
+  } else {
+    urlGroup.style.display = 'none';
+    boardInfo.style.display = '';
+    const meta = boardInfo.querySelector('.edit-slot-board-meta');
+    const icon = boardIcon(slot.type);
+    meta.innerHTML = `<span class="edit-slot-board-icon">${icon}</span><code>${escapeHtml(slot.boardCode || '')}</code>`;
+  }
+  document.getElementById('edit-slot-modal').style.display = 'flex';
+  openModalHistory();
+};
+window.closeEditSlotModal = function() {
+  editingSlotId = null;
+  closeModal('edit-slot-modal');
+};
+window.confirmEditSlot = async function() {
+  if (!editingSlotId || !currentClassAlias) return;
+  const slot = currentClassSlots.find(s => s.id === editingSlotId);
+  if (!slot) { toast('카드를 찾을 수 없습니다'); return; }
+  const title = document.getElementById('edit-slot-title').value.trim();
+  if (!title) { toast('표시 제목을 입력하세요'); return; }
+  const patch = { title };
+  if (slot.externalUrl) {
+    const rawUrl = document.getElementById('edit-slot-url').value.trim();
+    if (!rawUrl) { toast('URL을 입력하세요'); return; }
+    const url = sanitizeUrl(rawUrl);
+    if (!url) { toast('유효하지 않은 URL입니다'); return; }
+    patch.externalUrl = url;
+  }
+  try {
+    await updateDoc(doc(db, 'classes', currentClassAlias, 'slots', editingSlotId), patch);
+    toast('수정됨');
+    closeModal('edit-slot-modal');
+    editingSlotId = null;
+  } catch (e) { console.error(e); toast('수정 실패'); }
 };
 
 // ══════════════════════════════════════
