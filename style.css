@@ -528,14 +528,14 @@ body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',
 .class-week-nav { display:flex; align-items:center; gap:8px; margin-left:auto; }
 .class-week-controls { justify-content:space-between; }
 .class-table-wrap { padding:16px 20px; overflow-x:auto; }
-.class-table { width:100%; border-collapse:collapse; background:var(--card-bg); border-radius:12px; overflow:hidden; box-shadow:var(--shadow); }
+.class-table { width:100%; table-layout:fixed; min-width:720px; border-collapse:collapse; background:var(--card-bg); border-radius:12px; overflow:hidden; box-shadow:var(--shadow); }
 .class-table thead tr { background:var(--primary-light); }
 .class-table th, .class-table td {
   border:1px solid var(--border); padding:10px 12px; text-align:left;
-  vertical-align:top; min-width:120px;
+  vertical-align:top; word-break:break-word; overflow-wrap:break-word;
 }
 .class-table thead th { color:var(--primary); font-weight:700; text-align:center; }
-.class-table-week { font-weight:600; white-space:nowrap; background:var(--bg); }
+.class-table-week { width:96px; font-weight:600; white-space:nowrap; background:var(--bg); }
 .class-table-row-this { background:rgba(74,144,217,.05); }
 .class-table-today { background:rgba(74,144,217,.12) !important; }
 .class-table-slot {
