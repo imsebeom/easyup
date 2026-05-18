@@ -362,6 +362,10 @@ function getTodayDayKey() {
   if (d >= 1 && d <= 5) return DAY_KEYS[d - 1];
   return 'mon';
 }
+/** Format a Date as YYYY-MM-DD (local time) */
+function toIsoDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 /** Get Monday of the week containing given date, as YYYY-MM-DD string */
 function getMondayStr(date) {
   const d = new Date(date);
@@ -369,7 +373,7 @@ function getMondayStr(date) {
   const day = d.getDay(); // Sun=0..Sat=6
   const diff = day === 0 ? -6 : 1 - day; // to Monday
   d.setDate(d.getDate() + diff);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return toIsoDate(d);
 }
 function shiftWeek(weekStartStr, offsetWeeks) {
   const d = new Date(weekStartStr + 'T00:00:00');
@@ -386,6 +390,21 @@ function getDateForDay(weekStartStr, dayKey) {
   const d = new Date(weekStartStr + 'T00:00:00');
   d.setDate(d.getDate() + DAY_KEYS.indexOf(dayKey));
   return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+/** ISO YYYY-MM-DD for a given {weekStart, day} pair */
+function getIsoDateForDay(weekStartStr, dayKey) {
+  const d = new Date(weekStartStr + 'T00:00:00');
+  d.setDate(d.getDate() + DAY_KEYS.indexOf(dayKey));
+  return toIsoDate(d);
+}
+/** Parse YYYY-MM-DD → { day, weekStart }; returns null for empty/invalid/weekend */
+function parsePickedDate(dateStr) {
+  if (!dateStr) return null;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const picked = new Date(y, m - 1, d);
+  const dow = picked.getDay(); // Sun=0..Sat=6
+  if (dow === 0 || dow === 6) return null;
+  return { day: DAY_KEYS[dow - 1], weekStart: getMondayStr(picked) };
 }
 
 /** Generate QR code as data URL (synchronous, uses QRCode.js) */
@@ -3356,6 +3375,8 @@ window.editSlot = function(slotId) {
   if (!slot) { toast('카드를 찾을 수 없습니다'); return; }
   editingSlotId = slotId;
   document.getElementById('edit-slot-title').value = slot.title || '';
+  const dateInput = document.getElementById('edit-slot-date');
+  dateInput.value = (slot.weekStart && slot.day) ? getIsoDateForDay(slot.weekStart, slot.day) : '';
   const urlGroup = document.getElementById('edit-slot-url-group');
   const boardInfo = document.getElementById('edit-slot-board-info');
   if (slot.externalUrl) {
@@ -3382,13 +3403,25 @@ window.confirmEditSlot = async function() {
   if (!slot) { toast('카드를 찾을 수 없습니다'); return; }
   const title = document.getElementById('edit-slot-title').value.trim();
   if (!title) { toast('표시 제목을 입력하세요'); return; }
-  const patch = { title };
+  const dateStr = document.getElementById('edit-slot-date').value;
+  if (!dateStr) { toast('배치 날짜를 선택하세요'); return; }
+  const parsed = parsePickedDate(dateStr);
+  if (!parsed) { toast('월~금 중에서 선택해주세요'); return; }
+  const patch = {};
+  if (title !== slot.title) patch.title = title;
+  if (parsed.day !== slot.day) patch.day = parsed.day;
+  if (parsed.weekStart !== slot.weekStart) patch.weekStart = parsed.weekStart;
   if (slot.externalUrl) {
     const rawUrl = document.getElementById('edit-slot-url').value.trim();
     if (!rawUrl) { toast('URL을 입력하세요'); return; }
     const url = sanitizeUrl(rawUrl);
     if (!url) { toast('유효하지 않은 URL입니다'); return; }
-    patch.externalUrl = url;
+    if (url !== slot.externalUrl) patch.externalUrl = url;
+  }
+  if (Object.keys(patch).length === 0) {
+    closeModal('edit-slot-modal');
+    editingSlotId = null;
+    return;
   }
   try {
     await updateDoc(doc(db, 'classes', currentClassAlias, 'slots', editingSlotId), patch);
@@ -4145,12 +4178,9 @@ window.confirmQuickPlace = async function() {
   const { boardCode, boardTitle, boardType, classAlias } = quickPlaceContext;
   const dateStr = document.getElementById('qp-date').value;
   if (!dateStr) { toast('날짜를 선택하세요'); return; }
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const picked = new Date(y, m - 1, d);
-  const dow = picked.getDay();
-  if (dow === 0 || dow === 6) { toast('월~금 중에서 선택해주세요'); return; }
-  const day = DAY_KEYS[dow - 1];
-  const weekStart = getMondayStr(picked);
+  const parsed = parsePickedDate(dateStr);
+  if (!parsed) { toast('월~금 중에서 선택해주세요'); return; }
+  const { day, weekStart } = parsed;
   try {
     const slotId = `${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`;
     await setDoc(doc(db, 'classes', classAlias, 'slots', slotId), {
@@ -4583,13 +4613,9 @@ document.addEventListener('click', async (e) => {
     const dateStr = form.querySelector('.bp-date-input').value;
     if (!alias || !dateStr) { toast('클래스/날짜를 선택하세요'); return; }
     if (!currentBoard) { toast('보드 정보 없음'); return; }
-    // Parse date as local (avoid UTC shift)
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const picked = new Date(y, m - 1, d);
-    const dow = picked.getDay(); // Sun=0..Sat=6
-    if (dow === 0 || dow === 6) { toast('월~금 중에서 선택해주세요'); return; }
-    const day = DAY_KEYS[dow - 1];
-    const weekStart = getMondayStr(picked);
+    const parsed = parsePickedDate(dateStr);
+    if (!parsed) { toast('월~금 중에서 선택해주세요'); return; }
+    const { day, weekStart } = parsed;
     try {
       const slotId = `${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`;
       await setDoc(doc(db, 'classes', alias, 'slots', slotId), {

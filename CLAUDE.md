@@ -387,4 +387,13 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - 주간 그리드/테이블 양쪽 ✏️ 버튼 추가 → `editSlot(slotId)` 호출
   - `edit-slot-modal`: 표시 제목 공통, 외부 URL 슬롯은 URL 필드 추가, 보드 슬롯은 연결된 보드 코드 미리보기 + 안내문
   - `confirmEditSlot()`: 제목·URL만 patch (`sanitizeUrl` 적용), boardCode/요일/주차 등 메타데이터는 보존
+- [x] 클래스 슬롯 카드 수정 시 배치 날짜 변경 (2026-05-18)
+  - `edit-slot-modal`에 `<input type="date">` 추가
+  - `editSlot()`: 현재 `weekStart` + `day`를 ISO YYYY-MM-DD로 변환해 input 초기값 설정
+  - `confirmEditSlot()`: 선택한 날짜를 월~금 검증 후 `weekStart`/`day`로 변환하여 patch에 포함 (quick-place 패턴 재사용)
+- [x] 날짜 유틸 헬퍼 통합 + no-op write 가드 (2026-05-18, /simplify)
+  - `toIsoDate(d)`: Date → YYYY-MM-DD (getMondayStr 내부 템플릿 추출)
+  - `getIsoDateForDay(weekStart, day)`: `{weekStart, day}` → ISO 문자열 (editSlot 인라인 8줄 → 1줄)
+  - `parsePickedDate(dateStr)`: YYYY-MM-DD → `{day, weekStart}` (주말이면 null) — `confirmEditSlot`/`confirmQuickPlace`/`bp-add-submit` 3곳에 흩어진 7줄 파싱·검증 블록 통합
+  - `confirmEditSlot()` 변경 필드만 patch에 포함, 변경 없으면 Firestore write 스킵 → 불필요한 onSnapshot 재렌더·과금 op 제거
 - [ ] 모바일 반응형 테스트
