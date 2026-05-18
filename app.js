@@ -6537,7 +6537,7 @@ function clRenderBookSide(side) {
           <div class="clb-chapter-label">Chapter</div>
           <h1 class="clb-chapter-title">${escapeHtml(card.title || '')}</h1>
           ${card.content ? `<p class="clb-chapter-desc">${escapeHtml(card.content)}</p>` : ''}
-          ${card.imageUrl ? `<div class="clb-chapter-img"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
+          ${card.imageUrl ? `<div class="clb-chapter-img${card.imageFit === 'contain' ? ' fit-contain' : ''}"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
           <div class="clb-chapter-stats">
             ${childCount}개 항목${subCatCount > 0 ? ` · ${subCatCount}개 하위 분류` : ''}
           </div>
@@ -6568,7 +6568,7 @@ function clRenderBookSide(side) {
           <div class="clb-section-label">${labelText}</div>
           <h2 class="clb-section-title" style="font-size:${titleSize}rem">${escapeHtml(card.title || '')}</h2>
           ${card.content ? `<p class="clb-section-desc">${escapeHtml(card.content)}</p>` : ''}
-          ${card.imageUrl ? `<div class="clb-section-img"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
+          ${card.imageUrl ? `<div class="clb-section-img${card.imageFit === 'contain' ? ' fit-contain' : ''}"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
           <div class="clb-section-stats">
             ${childCount}개 항목${subCatCount > 0 ? ` · ${subCatCount}개 하위 분류` : ''}
           </div>
@@ -6598,7 +6598,7 @@ function clRenderBookSide(side) {
     <div class="clb-entry" data-id="${escapeHtml(card.id)}" data-type="${card.cardType}" style="--entry-color:${color}">
       ${breadcrumb}
       <div class="clb-entry-word">${escapeHtml(card.title || '')}</div>
-      ${card.imageUrl ? `<div class="clb-entry-img"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
+      ${card.imageUrl ? `<div class="clb-entry-img${card.imageFit === 'contain' ? ' fit-contain' : ''}"><img src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></div>` : ''}
       ${card.content ? `<div class="clb-entry-desc">${escapeHtml(card.content)}</div>` : ''}
       <div class="clb-entry-footer">
         <span class="clb-entry-author">${escapeHtml(card.name || '')}</span>
@@ -6941,6 +6941,8 @@ window.clOpenCardEditor = function(cardId, parentId, cardType) {
     }
     CL.editorImageUrl = card.imageUrl || '';
     CL.editorImagePath = card.imagePath || '';
+    const fitValue = card.imageFit === 'contain' ? 'contain' : 'cover';
+    document.querySelectorAll('input[name="cl-editor-fit"]').forEach(r => { r.checked = (r.value === fitValue); });
   } else {
     heading.textContent = cardType === 'category' ? '분류기준 추가' : '카드 추가';
     titleInput.value = '';
@@ -6950,6 +6952,7 @@ window.clOpenCardEditor = function(cardId, parentId, cardType) {
     dropzone.style.display = 'block';
     CL.editorImageUrl = '';
     CL.editorImagePath = '';
+    document.querySelectorAll('input[name="cl-editor-fit"]').forEach(r => { r.checked = (r.value === 'cover'); });
   }
 
   // Reset file input
@@ -7010,6 +7013,8 @@ window.clSaveCard = async function() {
   const title = document.getElementById('cl-editor-title').value.trim();
   if (!title) { toast('제목을 입력하세요'); return; }
   const content = document.getElementById('cl-editor-content').value.trim();
+  const fitRadio = document.querySelector('input[name="cl-editor-fit"]:checked');
+  const imageFit = fitRadio?.value === 'contain' ? 'contain' : 'cover';
 
   const saveBtn = document.getElementById('cl-editor-save');
   saveBtn.disabled = true;
@@ -7029,7 +7034,7 @@ window.clSaveCard = async function() {
     if (CL.editingCardId) {
       // Update existing card
       await updateDoc(doc(db, 'boards', currentBoardCode, 'submissions', CL.editingCardId), {
-        title, content, imageUrl, imagePath
+        title, content, imageUrl, imagePath, imageFit
       });
       toast('수정되었습니다');
     } else {
@@ -7045,6 +7050,7 @@ window.clSaveCard = async function() {
         content,
         imageUrl,
         imagePath,
+        imageFit,
         order: maxOrder + 1000,
         color: '',
         stars: [],

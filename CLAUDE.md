@@ -396,4 +396,10 @@ CLI: `python eleup_api.py inquiry "제목" --desc "설명"`
   - `getIsoDateForDay(weekStart, day)`: `{weekStart, day}` → ISO 문자열 (editSlot 인라인 8줄 → 1줄)
   - `parsePickedDate(dateStr)`: YYYY-MM-DD → `{day, weekStart}` (주말이면 null) — `confirmEditSlot`/`confirmQuickPlace`/`bp-add-submit` 3곳에 흩어진 7줄 파싱·검증 블록 통합
   - `confirmEditSlot()` 변경 필드만 patch에 포함, 변경 없으면 Firestore write 스킵 → 불필요한 onSnapshot 재렌더·과금 op 제거
+- [x] 분류하기 카드 이미지 표시 방식 선택 (2026-05-18)
+  - 카드 추가/수정 모달에 라디오 버튼: 너비맞춤(cover, 기본) / 전체보기(contain)
+  - Firestore 필드: `imageFit` (cover|contain) — 기존 카드는 필드 없음 → cover로 처리(현행 유지)
+  - 책 뷰 렌더링: `.clb-entry-img`, `.clb-chapter-img`, `.clb-section-img`에 `fit-contain` 클래스 토글
+  - CSS: 기본 `object-fit:cover`, `.fit-contain` 오버라이드로 contain + 가운데 정렬 + 베이지 배경
+  - 인쇄/소책자도 동일 `style.css` 재사용 → 자동 적용
 - [ ] 모바일 반응형 테스트

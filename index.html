@@ -844,6 +844,11 @@
             <input type="file" id="cl-editor-file" accept="image/*" onchange="clEditorFileChange(this)">
             <p>클릭하거나 이미지를 드래그하세요</p>
           </div>
+          <div id="cl-editor-fit-group" class="cl-fit-options" style="margin-top:10px">
+            <span class="cl-fit-label">책 뷰 표시:</span>
+            <label><input type="radio" name="cl-editor-fit" value="cover" checked> 너비맞춤(잘림)</label>
+            <label><input type="radio" name="cl-editor-fit" value="contain"> 전체보기</label>
+          </div>
         </div>
         <div class="form-group" id="cl-editor-content-group">
           <label>설명 (선택)</label>
